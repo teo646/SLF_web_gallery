@@ -60,6 +60,57 @@ html, body {
   letter-spacing: 0.02em;
 }
 
+.loading-text {
+  font-size: 14px;
+  color: #e8e4df;
+  margin-bottom: 14px;
+}
+
+.controls-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 14px 0 16px;
+  text-align: left;
+}
+
+.ctrl-key {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 5px;
+  padding: 2px 8px;
+  color: #c8d8f0;
+  white-space: nowrap;
+  justify-self: start;
+  align-self: center;
+}
+
+.ctrl-desc {
+  font-size: 13px;
+  color: #bbb;
+  align-self: center;
+}
+
+.close-btn {
+  display: block;
+  margin: 14px auto 0;
+  padding: 6px 20px;
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.22);
+  border-radius: 6px;
+  color: #ddd;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.close-btn:hover {
+  background: rgba(255,255,255,0.22);
+  color: #fff;
+}
+
 /* ── 진행바 ─────────────────────────────────────────────────── */
 
 .progress-bar {
