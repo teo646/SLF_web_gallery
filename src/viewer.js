@@ -194,6 +194,14 @@ export class SLFViewer {
     const ceiling2 = new THREE.PointLight(0xfff5e0, 0.9, 20);
     ceiling2.position.set(2, H - 0.2, 0);
     this._scene.add(ceiling2);
+
+    const ceiling3 = new THREE.PointLight(0xfff5e0, 0.9, 20);
+    ceiling3.position.set(0, H - 0.2, -2);
+    this._scene.add(ceiling3);
+
+    const ceiling4 = new THREE.PointLight(0xfff5e0, 0.9, 20);
+    ceiling4.position.set(0, H - 0.2, 2);
+    this._scene.add(ceiling4);
   }
 
   // ── FPS 컨트롤 ────────────────────────────────────────────────────────────
