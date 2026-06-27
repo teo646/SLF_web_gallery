@@ -1,6 +1,7 @@
 /**
  * SLF 갤러리 뷰어.
- * Three.js + 커스텀 GLSL 셰이더 + FPS 카메라 (PointerLock).
+ * Three.js + 커스텀 GLSL 셰이더 + FPS 카메라.
+ * LOD: 가장 바라보는 그림만 SH 전체로 렌더링, 나머지는 DC(Y0)만 사용한 플랫 이미지.
  */
 
 import * as THREE from 'three';
@@ -15,12 +16,19 @@ const _C3 = [-0.5900435899266435,  2.890611442640554,  -0.4570457994644658,
               0.3731763325901154, -0.4570457994644658,   1.445305721320277,
              -0.5900435899266435];
 
-// ── 방 치수 & 그림 배치 ──────────────────────────────────────────────────────
+// ── 방 치수 ──────────────────────────────────────────────────────────────────
 
-const ROOM = { W: 8, H: 3, D: 8 };
-const PAINTING_H = 2.0;          // 그림 세로 크기 (월드 단위)
-const PAINTING_Y = 1.5;          // 그림 중심 높이
-const PAINTING_Z = -ROOM.D / 2 + 0.015; // 북쪽 벽 바로 앞
+const ROOM      = { W: 8, H: 3, D: 8 };
+const PAINTING_H = 2.0;
+const PAINTING_Y = 1.5;
+
+// 4면 벽 배치 (북·남·동·서)
+const WALLS = [
+  { pos: new THREE.Vector3(0,                PAINTING_Y, -ROOM.D / 2 + 0.015), rot: new THREE.Euler(0,             0, 0) },
+  { pos: new THREE.Vector3(0,                PAINTING_Y,  ROOM.D / 2 - 0.015), rot: new THREE.Euler(0,      Math.PI, 0) },
+  { pos: new THREE.Vector3( ROOM.W / 2 - 0.015, PAINTING_Y, 0),                rot: new THREE.Euler(0, -Math.PI / 2, 0) },
+  { pos: new THREE.Vector3(-ROOM.W / 2 + 0.015, PAINTING_Y, 0),                rot: new THREE.Euler(0,  Math.PI / 2, 0) },
+];
 
 // ── GLSL 셰이더 ──────────────────────────────────────────────────────────────
 
@@ -114,18 +122,16 @@ export class SLFViewer {
     this._renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this._renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    this._scene = new THREE.Scene();
-
+    this._scene  = new THREE.Scene();
     this._camera = new THREE.PerspectiveCamera(70, 1, 0.01, 100);
 
-    // 그림 상태
-    this._paintingMesh = null;
-    this._K            = 0;
-    this._dcOnly       = false;
+    // 갤러리 상태
+    this._paintings  = [];  // { mesh, K }
+    this._primaryIdx = -1;
 
     // FPS 상태
     this._yaw         = 0;
-    this._pitch        = 0;
+    this._pitch       = 0;
     this._targetYaw   = 0;
     this._targetPitch = 0;
     this._pos      = new THREE.Vector3(0, 1.6, ROOM.D / 2 - 0.5);
@@ -133,9 +139,10 @@ export class SLFViewer {
     this._lastTime = performance.now();
 
     // 매 프레임 재사용 벡터
-    this._fwd     = new THREE.Vector3();
-    this._rgt     = new THREE.Vector3();
-    this._lookDir = new THREE.Vector3();
+    this._fwd           = new THREE.Vector3();
+    this._rgt           = new THREE.Vector3();
+    this._lookDir       = new THREE.Vector3();
+    this._dirToPainting = new THREE.Vector3();
 
     this._buildRoom();
     this._setupFPS();
@@ -153,14 +160,13 @@ export class SLFViewer {
     const floorMat = new THREE.MeshStandardMaterial({ color: 0x3d2b1f, roughness: 0.85 });
     const ceilMat  = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1.0 });
 
-    // [geometry, position, euler rotation, material]
     const panels = [
       [new THREE.PlaneGeometry(W, D), [0, 0,    0],    [-Math.PI/2, 0,          0], floorMat],
       [new THREE.PlaneGeometry(W, D), [0, H,    0],    [ Math.PI/2, 0,          0], ceilMat ],
-      [new THREE.PlaneGeometry(W, H), [0, H/2, -D/2],  [0,          0,          0], wallMat ], // 북 (그림 벽)
-      [new THREE.PlaneGeometry(W, H), [0, H/2,  D/2],  [0,          Math.PI,    0], wallMat ], // 남
-      [new THREE.PlaneGeometry(D, H), [ W/2, H/2, 0],  [0,         -Math.PI/2,  0], wallMat ], // 동
-      [new THREE.PlaneGeometry(D, H), [-W/2, H/2, 0],  [0,          Math.PI/2,  0], wallMat ], // 서
+      [new THREE.PlaneGeometry(W, H), [0, H/2, -D/2],  [0,          0,          0], wallMat ],
+      [new THREE.PlaneGeometry(W, H), [0, H/2,  D/2],  [0,          Math.PI,    0], wallMat ],
+      [new THREE.PlaneGeometry(D, H), [ W/2, H/2, 0],  [0,         -Math.PI/2,  0], wallMat ],
+      [new THREE.PlaneGeometry(D, H), [-W/2, H/2, 0],  [0,          Math.PI/2,  0], wallMat ],
     ];
 
     for (const [geom, pos, rot, mat] of panels) {
@@ -170,7 +176,6 @@ export class SLFViewer {
       this._scene.add(mesh);
     }
 
-    // 조명
     this._scene.add(new THREE.AmbientLight(0xfff8f0, 0.55));
 
     const ceiling1 = new THREE.PointLight(0xfff5e0, 0.9, 20);
@@ -187,11 +192,10 @@ export class SLFViewer {
   _setupFPS() {
     const canvas = this._canvas;
 
-    // 클릭한 화면 위치 → 시선 방향으로 전환
     canvas.addEventListener('click', e => {
-      const rect  = canvas.getBoundingClientRect();
-      const ndcX  = ((e.clientX - rect.left) / rect.width)  *  2 - 1;
-      const ndcY  = ((e.clientY - rect.top)  / rect.height) * -2 + 1;
+      const rect = canvas.getBoundingClientRect();
+      const ndcX = ((e.clientX - rect.left) / rect.width)  *  2 - 1;
+      const ndcY = ((e.clientY - rect.top)  / rect.height) * -2 + 1;
 
       const dir = new THREE.Vector3(ndcX, ndcY, 0.5)
         .unproject(this._camera)
@@ -213,51 +217,63 @@ export class SLFViewer {
 
   // ── 공개 API ─────────────────────────────────────────────────────────────
 
-  setPainting(textures, meta) {
-    this._disposePainting();
+  /**
+   * @param {{ textures: THREE.DataTexture[], meta: object, name: string }[]} galleryData
+   */
+  setGallery(galleryData) {
+    this._disposeGallery();
 
-    const K      = textures.length;
-    this._K      = K;
-    const aspect = meta.W / meta.H;
-    const paintW = aspect * PAINTING_H;
+    for (let i = 0; i < galleryData.length && i < WALLS.length; i++) {
+      const { textures, meta } = galleryData[i];
+      const wall   = WALLS[i];
+      const K      = textures.length;
+      const aspect = meta.W / meta.H;
 
-    const geometry = new THREE.PlaneGeometry(paintW, PAINTING_H);
+      const geometry = new THREE.PlaneGeometry(aspect * PAINTING_H, PAINTING_H);
 
-    const uniforms = {};
-    for (let k = 0; k < K; k++) uniforms[`u_k${k}`] = { value: textures[k] };
-    uniforms.u_cam_local = { value: new THREE.Vector3() };
-    uniforms.u_aspect    = { value: aspect };
+      const uniforms = {};
+      for (let k = 0; k < K; k++) uniforms[`u_k${k}`] = { value: textures[k] };
+      uniforms.u_cam_local = { value: new THREE.Vector3() };
+      uniforms.u_aspect    = { value: aspect };
 
-    const material = new THREE.ShaderMaterial({
-      uniforms,
-      vertexShader:   VERT,
-      fragmentShader: buildFragShader(K, this._dcOnly),
-      glslVersion:    THREE.GLSL3,
-    });
+      const material = new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader:   VERT,
+        fragmentShader: buildFragShader(K, true), // 초기엔 DC-only (플랫)
+        glslVersion:    THREE.GLSL3,
+      });
 
-    this._paintingMesh = new THREE.Mesh(geometry, material);
-    this._paintingMesh.position.set(0, PAINTING_Y, PAINTING_Z);
-    this._scene.add(this._paintingMesh);
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.copy(wall.pos);
+      mesh.rotation.copy(wall.rot);
+      this._scene.add(mesh);
 
-    console.log(`[SLF] ${meta.W}×${meta.H}  degree=${meta.degree}  K=${K}`);
-  }
+      this._paintings.push({ mesh, K });
+    }
 
-  setDCOnly(enabled) {
-    this._dcOnly = enabled;
-    if (!this._paintingMesh) return;
-    this._paintingMesh.material.fragmentShader = buildFragShader(this._K, enabled);
-    this._paintingMesh.material.needsUpdate = true;
+    // 정적 오브젝트이므로 matrixWorld를 한 번만 계산
+    this._scene.updateMatrixWorld();
+    this._primaryIdx = -1;
   }
 
   dispose() {
-    this._disposePainting();
+    this._disposeGallery();
     this._renderer.dispose();
   }
 
   // ── 내부 ─────────────────────────────────────────────────────────────────
 
+  _disposeGallery() {
+    for (const p of this._paintings) {
+      p.mesh.geometry.dispose();
+      p.mesh.material.dispose();
+      this._scene.remove(p.mesh);
+    }
+    this._paintings  = [];
+    this._primaryIdx = -1;
+  }
+
   _updateCamera(dt) {
-    // 클릭 목표 방향으로 부드럽게 회전
     const t = Math.min(1.0, dt * 8);
     let dyaw = this._targetYaw - this._yaw;
     if (dyaw >  Math.PI) dyaw -= 2 * Math.PI;
@@ -265,7 +281,7 @@ export class SLFViewer {
     this._yaw   += dyaw * t;
     this._pitch += (this._targetPitch - this._pitch) * t;
 
-    const speed = 3.0 * dt;
+    const speed = 1.5 * dt;
     const { _keys: keys, _yaw: yaw } = this;
 
     this._fwd.set( Math.sin(yaw), 0, -Math.cos(yaw));
@@ -276,7 +292,6 @@ export class SLFViewer {
     if (keys.has('KeyA') || keys.has('ArrowLeft'))  this._pos.addScaledVector(this._rgt, -speed);
     if (keys.has('KeyD') || keys.has('ArrowRight')) this._pos.addScaledVector(this._rgt,  speed);
 
-    // 방 경계 충돌
     const { W, D } = ROOM;
     const m = 0.35;
     this._pos.x = Math.max(-W/2 + m, Math.min(W/2 - m, this._pos.x));
@@ -294,6 +309,43 @@ export class SLFViewer {
     );
   }
 
+  // 카메라 시선과 가장 정렬된 그림을 SLF로 전환
+  _updateLOD() {
+    if (this._paintings.length === 0) return;
+
+    let bestScore = -Infinity;
+    let bestIdx   = 0;
+
+    for (let i = 0; i < this._paintings.length; i++) {
+      this._dirToPainting
+        .subVectors(this._paintings[i].mesh.position, this._pos)
+        .normalize();
+      const score = this._dirToPainting.dot(this._lookDir);
+      if (score > bestScore) { bestScore = score; bestIdx = i; }
+    }
+
+    if (bestIdx !== this._primaryIdx) {
+      this._primaryIdx = bestIdx;
+      for (let i = 0; i < this._paintings.length; i++) {
+        const p = this._paintings[i];
+        p.mesh.material.fragmentShader = buildFragShader(p.K, i !== bestIdx);
+        p.mesh.material.needsUpdate = true;
+      }
+    }
+  }
+
+  // 각 그림의 로컬 좌표계에서 카메라 위치 갱신 (SH 셰이더 입력)
+  _updatePaintingUniforms() {
+    for (const p of this._paintings) {
+      const localCam = p.mesh.worldToLocal(this._pos.clone());
+      p.mesh.material.uniforms.u_cam_local.value.set(
+        localCam.x / PAINTING_H,
+        localCam.y / PAINTING_H,
+        localCam.z / PAINTING_H,
+      );
+    }
+  }
+
   _animate() {
     requestAnimationFrame(() => this._animate());
 
@@ -302,17 +354,8 @@ export class SLFViewer {
     this._lastTime = now;
 
     this._updateCamera(dt);
-
-    // 그림 셰이더 u_cam_local 갱신 (그림 로컬 좌표계, 높이=1 기준)
-    if (this._paintingMesh) {
-      const pp = this._paintingMesh.position;
-      const cl = this._paintingMesh.material.uniforms.u_cam_local.value;
-      cl.set(
-        (this._pos.x - pp.x) / PAINTING_H,
-        (this._pos.y - pp.y) / PAINTING_H,
-        (this._pos.z - pp.z) / PAINTING_H,
-      );
-    }
+    this._updateLOD();
+    this._updatePaintingUniforms();
 
     this._renderer.render(this._scene, this._camera);
   }
@@ -324,13 +367,5 @@ export class SLFViewer {
     this._renderer.setSize(w, h, false);
     this._camera.aspect = w / h;
     this._camera.updateProjectionMatrix();
-  }
-
-  _disposePainting() {
-    if (!this._paintingMesh) return;
-    this._paintingMesh.geometry.dispose();
-    this._paintingMesh.material.dispose();
-    this._scene.remove(this._paintingMesh);
-    this._paintingMesh = null;
   }
 }

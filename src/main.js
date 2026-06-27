@@ -7,9 +7,6 @@ const overlayEl = document.getElementById('overlay');
 const statusEl  = document.getElementById('status');
 
 const viewer = new SLFViewer(canvas);
-let currentTextures = [];
-
-// ── 갤러리 초기화 ─────────────────────────────────────────────────────────
 
 async function init() {
   let index;
@@ -26,47 +23,22 @@ async function init() {
     return;
   }
 
-  await loadPainting(paintings[0]);
+  showStatus('갤러리 로딩 중…');
+
+  const galleryData = await Promise.all(
+    paintings.map(name =>
+      loadSLFPainting(`${import.meta.env.BASE_URL}gallery/${name}`)
+        .then(data => ({ ...data, name }))
+    )
+  );
+
+  viewer.setGallery(galleryData);
+  overlayEl.style.display = 'none';
 }
 
-async function loadPainting(name) {
-  currentTextures.forEach(t => t.dispose());
-  currentTextures = [];
-
-  showStatus(`Loading "${name.replace(/_/g, ' ')}"…`, false);
-
-  try {
-    const { textures, meta } = await loadSLFPainting(
-      `${import.meta.env.BASE_URL}gallery/${name}`,
-      (n, total) => showStatus(
-        `Loading "${name.replace(/_/g, ' ')}"…  ${n}/${total}`,
-        true,
-        n / total,
-      ),
-    );
-
-    currentTextures = textures;
-    viewer.setPainting(textures, meta);
-    overlayEl.style.display = 'none';
-  } catch (err) {
-    showStatus(`오류: ${err.message}`);
-    console.error(err);
-  }
-}
-
-// ── 오버레이 ─────────────────────────────────────────────────────────────
-
-function showStatus(msg, withBar = false, progress = 0) {
+function showStatus(msg) {
   overlayEl.style.display = 'flex';
-  if (withBar) {
-    statusEl.innerHTML = `
-      <div>${msg}</div>
-      <div class="progress-bar">
-        <div class="progress-fill" style="width:${Math.round(progress * 100)}%"></div>
-      </div>`;
-  } else {
-    statusEl.textContent = msg;
-  }
+  statusEl.textContent = msg;
 }
 
 init();
