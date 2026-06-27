@@ -22,6 +22,12 @@ const ROOM      = { W: 8, H: 3, D: 8 };
 const PAINTING_H = 2.0;
 const PAINTING_Y = 1.5;
 
+// HUD 캔버스 텍스처 해상도 및 3D 크기
+const HUD_CW   = 600;
+const HUD_CH   = 150;
+const HUD_3D_W = 0.85;
+const HUD_3D_H = HUD_3D_W * HUD_CH / HUD_CW;
+
 // 4면 벽 배치 (북·남·동·서)
 const WALLS = [
   { pos: new THREE.Vector3(0,                PAINTING_Y, -ROOM.D / 2 + 0.015), rot: new THREE.Euler(0,             0, 0) },
@@ -145,10 +151,6 @@ export class SLFViewer {
     this._lookDir       = new THREE.Vector3();
     this._dirToPainting = new THREE.Vector3();
 
-    // 그림별 HUD (진행바)
-    this._hudContainer = document.createElement('div');
-    this._hudContainer.id = 'painting-hud';
-    canvas.parentElement.appendChild(this._hudContainer);
     this._hudItems = [];
 
     this._buildRoom();
@@ -256,26 +258,29 @@ export class SLFViewer {
 
       this._paintings.push({ mesh, K, ready: false });
 
-      // 그림 표면 하단부 (벽면 위, 그림 안쪽) 월드 좌표
-      const anchorWorld = wall.pos.clone().add(new THREE.Vector3(0, -PAINTING_H * 0.28, 0));
+      // 3D HUD: 벽면 위에 캔버스 텍스처 평면을 부착
+      const hudCanvas = document.createElement('canvas');
+      hudCanvas.width  = HUD_CW;
+      hudCanvas.height = HUD_CH;
+      const hudCtx = hudCanvas.getContext('2d');
+      const hudTex = new THREE.CanvasTexture(hudCanvas);
+      hudTex.colorSpace = THREE.SRGBColorSpace;
 
-      const hudEl = document.createElement('div');
-      hudEl.className = 'painting-hud-item';
-      hudEl.innerHTML = `
-        <div class="hud-status">◐ 사실적 렌더링 준비 중 (0%)</div>
-        <div class="hud-track"><div class="hud-bar"></div></div>
-        <div class="hud-hint">바가 채워지면 사실적 조명 렌더링으로 전환</div>
-      `;
-      this._hudContainer.appendChild(hudEl);
+      const hudGeo  = new THREE.PlaneGeometry(HUD_3D_W, HUD_3D_H);
+      const hudMat  = new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthWrite: false });
+      const hudMesh = new THREE.Mesh(hudGeo, hudMat);
 
-      this._hudItems.push({
-        anchorWorld,
-        el:      hudEl,
-        barEl:   hudEl.querySelector('.hud-bar'),
-        statEl:  hudEl.querySelector('.hud-status'),
-        done:    false,
-        hidden:  false,
-      });
+      // 벽 법선 방향으로 살짝 앞에 배치해 z-fighting 방지
+      const normal = new THREE.Vector3(0, 0, 1).applyEuler(wall.rot);
+      hudMesh.position.copy(wall.pos)
+        .add(new THREE.Vector3(0, -PAINTING_H * 0.28, 0))
+        .addScaledVector(normal, 0.012);
+      hudMesh.rotation.copy(wall.rot);
+      this._scene.add(hudMesh);
+
+      this._drawHUD(hudCtx, hudCanvas, hudTex, 0);
+
+      this._hudItems.push({ hudMesh, hudCtx, hudCanvas, hudTex, done: false, fadeStartTime: 0 });
     }
 
     // 정적 오브젝트이므로 matrixWorld를 한 번만 계산
@@ -291,19 +296,11 @@ export class SLFViewer {
   setProgress(index, loaded, total) {
     const item = this._hudItems[index];
     if (!item || item.done) return;
-    const pct    = total > 0 ? Math.min(1, loaded / total) : 0;
-    const pctInt = Math.round(pct * 100);
-    item.barEl.style.width = `${pctInt}%`;
+    const pct = total > 0 ? Math.min(1, loaded / total) : 0;
+    this._drawHUD(item.hudCtx, item.hudCanvas, item.hudTex, pct);
     if (pct >= 1) {
-      item.done = true;
-      item.statEl.textContent = '✓ 사실적 렌더링 완료';
-      item.el.classList.add('done');
-      setTimeout(() => {
-        item.el.style.display = 'none';
-        item.hidden = true;
-      }, 900);
-    } else {
-      item.statEl.textContent = `◐ 사실적 렌더링 준비 중 (${pctInt}%)`;
+      item.done          = true;
+      item.fadeStartTime = performance.now();
     }
   }
 
@@ -344,7 +341,12 @@ export class SLFViewer {
     this._paintings  = [];
     this._primaryIdx = -1;
 
-    for (const item of this._hudItems) item.el.remove();
+    for (const item of this._hudItems) {
+      this._scene.remove(item.hudMesh);
+      item.hudMesh.geometry.dispose();
+      item.hudMesh.material.dispose();
+      item.hudTex.dispose();
+    }
     this._hudItems = [];
   }
 
@@ -427,18 +429,55 @@ export class SLFViewer {
     }
   }
 
-  _updateHudPositions() {
-    if (this._hudItems.length === 0) return;
-    const w = this._canvas.clientWidth;
-    const h = this._canvas.clientHeight;
-    for (const item of this._hudItems) {
-      if (item.hidden) continue;
-      const v = item.anchorWorld.clone().project(this._camera);
-      if (v.z > 1) { item.el.style.display = 'none'; continue; }
-      if (!item.done) item.el.style.display = '';
-      item.el.style.left = `${(v.x * 0.5 + 0.5) * w}px`;
-      item.el.style.top  = `${(-v.y * 0.5 + 0.5) * h}px`;
+  _drawHUD(ctx, canvas, tex, pct) {
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // 배경
+    ctx.fillStyle = 'rgba(12, 8, 4, 0.82)';
+    ctx.beginPath();
+    ctx.roundRect(4, 4, w - 8, h - 8, 12);
+    ctx.fill();
+
+    // 테두리
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(5, 5, w - 10, h - 10, 11);
+    ctx.stroke();
+
+    // 상태 텍스트
+    const pctInt = Math.round(pct * 100);
+    ctx.fillStyle = 'rgba(255, 248, 235, 0.9)';
+    ctx.font = 'bold 26px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`◐ 사실적 렌더링 준비 중 (${pctInt}%)`, w / 2, h * 0.30);
+
+    // 진행바 트랙
+    const tx = 24, ty = h * 0.54, tw = w - 48, th = 14;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.beginPath();
+    ctx.roundRect(tx, ty, tw, th, 7);
+    ctx.fill();
+
+    // 진행바 채우기
+    if (pct > 0) {
+      const grad = ctx.createLinearGradient(tx, 0, tx + tw, 0);
+      grad.addColorStop(0, '#b8860b');
+      grad.addColorStop(1, '#f0c040');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.roundRect(tx, ty, tw * pct, th, 7);
+      ctx.fill();
     }
+
+    // 힌트 텍스트
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.font = '20px system-ui, -apple-system, sans-serif';
+    ctx.fillText('바가 채워지면 사실적 조명 렌더링으로 전환', w / 2, h * 0.82);
+
+    tex.needsUpdate = true;
   }
 
   _animate() {
@@ -452,8 +491,16 @@ export class SLFViewer {
     this._updateLOD();
     this._updatePaintingUniforms();
 
+    // 완료된 HUD 페이드 아웃
+    for (const item of this._hudItems) {
+      if (item.done && item.hudMesh.visible) {
+        const t = (now - item.fadeStartTime) / 800;
+        item.hudMesh.material.opacity = Math.max(0, 1 - t);
+        if (item.hudMesh.material.opacity <= 0) item.hudMesh.visible = false;
+      }
+    }
+
     this._renderer.render(this._scene, this._camera);
-    this._updateHudPositions();
   }
 
   _resize() {

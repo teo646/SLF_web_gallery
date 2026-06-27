@@ -3,17 +3,17 @@
 SH PNG 데이터를 웹 갤러리 형식으로 변환.
 
 Usage:
-    python scripts/convert_to_web.py <sh_pngs_dir> [--name <painting_name>]
+    python scripts/convert_to_web.py <model_dir> [--name <painting_name>]
 
     예:
         python scripts/convert_to_web.py \\
-            ../surface-light-fields-for-planar-paintings/outputs/models/Merry_Company_on_a_Terrace/sh_pngs
+            ../surface-light-fields-for-planar-paintings/outputs/models/Merry_Company_on_a_Terrace
 
-        python scripts/convert_to_web.py /path/to/sh_pngs --name MyPainting
+        python scripts/convert_to_web.py /path/to/MyPainting --name MyPainting
 
 동작:
-    1. <sh_pngs_dir>/meta.npz  →  public/gallery/<name>/meta.json
-    2. <sh_pngs_dir>/k00.png … k{K-1}.png  →  public/gallery/<name>/
+    1. <model_dir>/sh_pngs/meta.npz  →  public/gallery/<name>/meta.json
+    2. <model_dir>/sh_pngs/k00.png … k{K-1}.png  →  public/gallery/<name>/
     3. public/gallery/index.json  에 name 추가 (중복 제외)
 """
 
@@ -29,20 +29,24 @@ GALLERY_DIR = Path(__file__).resolve().parent.parent / "public" / "gallery"
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="sh_pngs 폴더를 SLF 웹 갤러리용으로 변환"
+        description="모델 폴더 안의 sh_pngs를 SLF 웹 갤러리용으로 변환"
     )
-    parser.add_argument("sh_pngs_dir", type=Path,
-                        help="sh_pngs 폴더 경로 (meta.npz + k00.png … 포함)")
+    parser.add_argument("model_dir", type=Path,
+                        help="모델 폴더 경로 (sh_pngs/ 하위 폴더를 포함해야 함)")
     parser.add_argument("--name", type=str, default=None,
-                        help="갤러리 슬러그 (기본: sh_pngs_dir 부모 폴더명)")
+                        help="갤러리 슬러그 (기본: model_dir 폴더명)")
     args = parser.parse_args()
 
-    src = args.sh_pngs_dir.resolve()
-    if not src.is_dir():
-        raise SystemExit(f"Error: 폴더가 없습니다 — {src}")
+    model_dir = args.model_dir.resolve()
+    if not model_dir.is_dir():
+        raise SystemExit(f"Error: 폴더가 없습니다 — {model_dir}")
 
-    # 갤러리 슬러그: 지정 없으면 부모 폴더(모델명)
-    name = args.name or src.parent.name
+    src = model_dir / "sh_pngs"
+    if not src.is_dir():
+        raise SystemExit(f"Error: sh_pngs 폴더가 없습니다 — {src}")
+
+    # 갤러리 슬러그: 지정 없으면 모델 폴더명
+    name = args.name or model_dir.name
 
     # ── meta.npz → meta.json ────────────────────────────────────────────────
     meta_npz = src / "meta.npz"
