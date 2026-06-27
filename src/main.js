@@ -14,7 +14,7 @@ let currentTextures = [];
 async function init() {
   let index;
   try {
-    index = await fetch('/gallery/index.json').then(r => r.json());
+    index = await fetch(`${import.meta.env.BASE_URL}gallery/index.json`).then(r => r.json());
   } catch {
     showStatus('gallery/index.json를 찾을 수 없습니다.\nscripts/convert_to_web.py를 먼저 실행하세요.');
     return;
@@ -37,7 +37,7 @@ async function loadPainting(name) {
 
   try {
     const { textures, meta } = await loadSLFPainting(
-      `/gallery/${name}`,
+      `${import.meta.env.BASE_URL}gallery/${name}`,
       (n, total) => showStatus(
         `Loading "${name.replace(/_/g, ' ')}"…  ${n}/${total}`,
         true,
