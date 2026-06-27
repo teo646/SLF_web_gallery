@@ -43,7 +43,8 @@ void main() {
 function buildFragShader(K, dcOnly = false) {
   const degree = Math.round(Math.sqrt(K)) - 1;
 
-  const samplerDecls = Array.from({ length: K }, (_, k) =>
+  // dcOnly 모드에서는 u_k0만 선언 (나머지는 미로드 상태일 수 있음)
+  const samplerDecls = Array.from({ length: dcOnly ? 1 : K }, (_, k) =>
     `uniform sampler2D u_k${k};`
   ).join('\n');
 
@@ -224,9 +225,8 @@ export class SLFViewer {
     this._disposeGallery();
 
     for (let i = 0; i < galleryData.length && i < WALLS.length; i++) {
-      const { textures, meta } = galleryData[i];
+      const { textures, meta, K } = galleryData[i]; // K는 메타에서 (DC 로드 시 textures.length=1)
       const wall   = WALLS[i];
-      const K      = textures.length;
       const aspect = meta.W / meta.H;
 
       const geometry = new THREE.PlaneGeometry(aspect * PAINTING_H, PAINTING_H);
@@ -248,12 +248,33 @@ export class SLFViewer {
       mesh.rotation.copy(wall.rot);
       this._scene.add(mesh);
 
-      this._paintings.push({ mesh, K });
+      this._paintings.push({ mesh, K, ready: false });
     }
 
     // 정적 오브젝트이므로 matrixWorld를 한 번만 계산
     this._scene.updateMatrixWorld();
     this._primaryIdx = -1;
+  }
+
+  /**
+   * 백그라운드에서 전체 SLF 텍스처가 준비됐을 때 호출.
+   * @param {number} index
+   * @param {THREE.DataTexture[]} allTextures  k00 ~ k{K-1}
+   */
+  upgradePainting(index, allTextures) {
+    const p = this._paintings[index];
+    if (!p || p.ready) return;
+
+    // 기존 임시 k0 텍스처 해제 후 전체 uniform 교체
+    p.mesh.material.uniforms.u_k0.value.dispose();
+    for (let k = 0; k < allTextures.length; k++) {
+      p.mesh.material.uniforms[`u_k${k}`] = { value: allTextures[k] };
+    }
+    p.K     = allTextures.length;
+    p.ready = true;
+
+    // 현재 바라보는 그림이면 즉시 SLF로 전환
+    if (index === this._primaryIdx) this._applyLOD();
   }
 
   dispose() {
@@ -326,11 +347,17 @@ export class SLFViewer {
 
     if (bestIdx !== this._primaryIdx) {
       this._primaryIdx = bestIdx;
-      for (let i = 0; i < this._paintings.length; i++) {
-        const p = this._paintings[i];
-        p.mesh.material.fragmentShader = buildFragShader(p.K, i !== bestIdx);
-        p.mesh.material.needsUpdate = true;
-      }
+      this._applyLOD();
+    }
+  }
+
+  // primary 변경 또는 upgrade 완료 시 셰이더 전환
+  _applyLOD() {
+    for (let i = 0; i < this._paintings.length; i++) {
+      const p       = this._paintings[i];
+      const useFull = i === this._primaryIdx && p.ready;
+      p.mesh.material.fragmentShader = buildFragShader(p.K, !useFull);
+      p.mesh.material.needsUpdate    = true;
     }
   }
 

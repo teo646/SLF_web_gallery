@@ -16,6 +16,18 @@ import { decode } from 'fast-png';
  * @param {(loaded: number, total: number) => void} [onProgress]
  * @returns {Promise<{ textures: THREE.DataTexture[], meta: object, K: number }>}
  */
+/** meta + k00만 로드 (즉시 표시용) */
+export async function loadSLFPaintingDC(basePath) {
+  const meta = await fetch(`${basePath}/meta.json`).then(r => {
+    if (!r.ok) throw new Error(`meta.json not found at ${basePath}`);
+    return r.json();
+  });
+  const { H, W, degree, coeff_min = -8.0, coeff_max = 8.0 } = meta;
+  const K  = (degree + 1) ** 2;
+  const k0 = await loadCoeffTexture(`${basePath}/k00.png`, W, H, coeff_min, coeff_max);
+  return { textures: [k0], meta, K };
+}
+
 export async function loadSLFPainting(basePath, onProgress) {
   const meta = await fetch(`${basePath}/meta.json`).then(r => {
     if (!r.ok) throw new Error(`meta.json not found at ${basePath}`);

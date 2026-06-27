@@ -1,6 +1,6 @@
 import './style.css';
 import { SLFViewer } from './viewer.js';
-import { loadSLFPainting } from './slfLoader.js';
+import { loadSLFPaintingDC, loadSLFPainting } from './slfLoader.js';
 
 const canvas    = /** @type {HTMLCanvasElement} */ (document.getElementById('canvas'));
 const overlayEl = document.getElementById('overlay');
@@ -25,15 +25,22 @@ async function init() {
 
   showStatus('갤러리 로딩 중…');
 
-  const galleryData = await Promise.all(
+  // Phase 1: meta + k00만 로드 → 즉시 표시
+  const dcData = await Promise.all(
     paintings.map(name =>
-      loadSLFPainting(`${import.meta.env.BASE_URL}gallery/${name}`)
+      loadSLFPaintingDC(`${import.meta.env.BASE_URL}gallery/${name}`)
         .then(data => ({ ...data, name }))
     )
   );
 
-  viewer.setGallery(galleryData);
+  viewer.setGallery(dcData);
   overlayEl.style.display = 'none';
+
+  // Phase 2: 백그라운드에서 전체 SLF 로드 → 준비되면 각 그림 업그레이드
+  paintings.forEach((name, i) => {
+    loadSLFPainting(`${import.meta.env.BASE_URL}gallery/${name}`)
+      .then(({ textures }) => viewer.upgradePainting(i, textures));
+  });
 }
 
 function showStatus(msg) {
