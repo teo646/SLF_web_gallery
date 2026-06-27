@@ -36,10 +36,12 @@ async function init() {
   viewer.setGallery(dcData);
   overlayEl.style.display = 'none';
 
-  // Phase 2: 백그라운드에서 전체 SLF 로드 → 준비되면 각 그림 업그레이드
+  // Phase 2: 백그라운드에서 전체 SLF 로드 → 진행 표시 후 각 그림 업그레이드
   paintings.forEach((name, i) => {
-    loadSLFPainting(`${import.meta.env.BASE_URL}gallery/${name}`)
-      .then(({ textures }) => viewer.upgradePainting(i, textures));
+    loadSLFPainting(
+      `${import.meta.env.BASE_URL}gallery/${name}`,
+      (loaded, total) => viewer.setProgress(i, loaded, total),
+    ).then(({ textures }) => viewer.upgradePainting(i, textures));
   });
 }
 

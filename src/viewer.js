@@ -145,6 +145,12 @@ export class SLFViewer {
     this._lookDir       = new THREE.Vector3();
     this._dirToPainting = new THREE.Vector3();
 
+    // 그림별 HUD (진행바)
+    this._hudContainer = document.createElement('div');
+    this._hudContainer.id = 'painting-hud';
+    canvas.parentElement.appendChild(this._hudContainer);
+    this._hudItems = [];
+
     this._buildRoom();
     this._setupFPS();
     this._resize();
@@ -232,7 +238,7 @@ export class SLFViewer {
       const geometry = new THREE.PlaneGeometry(aspect * PAINTING_H, PAINTING_H);
 
       const uniforms = {};
-      for (let k = 0; k < K; k++) uniforms[`u_k${k}`] = { value: textures[k] };
+      for (let k = 0; k < textures.length; k++) uniforms[`u_k${k}`] = { value: textures[k] };
       uniforms.u_cam_local = { value: new THREE.Vector3() };
       uniforms.u_aspect    = { value: aspect };
 
@@ -249,11 +255,56 @@ export class SLFViewer {
       this._scene.add(mesh);
 
       this._paintings.push({ mesh, K, ready: false });
+
+      // 그림 표면 하단부 (벽면 위, 그림 안쪽) 월드 좌표
+      const anchorWorld = wall.pos.clone().add(new THREE.Vector3(0, -PAINTING_H * 0.28, 0));
+
+      const hudEl = document.createElement('div');
+      hudEl.className = 'painting-hud-item';
+      hudEl.innerHTML = `
+        <div class="hud-status">◐ 사실적 렌더링 준비 중 (0%)</div>
+        <div class="hud-track"><div class="hud-bar"></div></div>
+        <div class="hud-hint">바가 채워지면 사실적 조명 렌더링으로 전환</div>
+      `;
+      this._hudContainer.appendChild(hudEl);
+
+      this._hudItems.push({
+        anchorWorld,
+        el:      hudEl,
+        barEl:   hudEl.querySelector('.hud-bar'),
+        statEl:  hudEl.querySelector('.hud-status'),
+        done:    false,
+        hidden:  false,
+      });
     }
 
     // 정적 오브젝트이므로 matrixWorld를 한 번만 계산
     this._scene.updateMatrixWorld();
     this._primaryIdx = -1;
+  }
+
+  /**
+   * @param {number} index
+   * @param {number} loaded  현재까지 완료된 텍스처 수
+   * @param {number} total   전체 텍스처 수 (K)
+   */
+  setProgress(index, loaded, total) {
+    const item = this._hudItems[index];
+    if (!item || item.done) return;
+    const pct    = total > 0 ? Math.min(1, loaded / total) : 0;
+    const pctInt = Math.round(pct * 100);
+    item.barEl.style.width = `${pctInt}%`;
+    if (pct >= 1) {
+      item.done = true;
+      item.statEl.textContent = '✓ 사실적 렌더링 완료';
+      item.el.classList.add('done');
+      setTimeout(() => {
+        item.el.style.display = 'none';
+        item.hidden = true;
+      }, 900);
+    } else {
+      item.statEl.textContent = `◐ 사실적 렌더링 준비 중 (${pctInt}%)`;
+    }
   }
 
   /**
@@ -292,6 +343,9 @@ export class SLFViewer {
     }
     this._paintings  = [];
     this._primaryIdx = -1;
+
+    for (const item of this._hudItems) item.el.remove();
+    this._hudItems = [];
   }
 
   _updateCamera(dt) {
@@ -373,6 +427,20 @@ export class SLFViewer {
     }
   }
 
+  _updateHudPositions() {
+    if (this._hudItems.length === 0) return;
+    const w = this._canvas.clientWidth;
+    const h = this._canvas.clientHeight;
+    for (const item of this._hudItems) {
+      if (item.hidden) continue;
+      const v = item.anchorWorld.clone().project(this._camera);
+      if (v.z > 1) { item.el.style.display = 'none'; continue; }
+      if (!item.done) item.el.style.display = '';
+      item.el.style.left = `${(v.x * 0.5 + 0.5) * w}px`;
+      item.el.style.top  = `${(-v.y * 0.5 + 0.5) * h}px`;
+    }
+  }
+
   _animate() {
     requestAnimationFrame(() => this._animate());
 
@@ -385,6 +453,7 @@ export class SLFViewer {
     this._updatePaintingUniforms();
 
     this._renderer.render(this._scene, this._camera);
+    this._updateHudPositions();
   }
 
   _resize() {
