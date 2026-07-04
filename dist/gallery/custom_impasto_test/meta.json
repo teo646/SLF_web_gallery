@@ -1,0 +1,13 @@
+{
+  "H": 1409,
+  "W": 2129,
+  "degree": 2,
+  "coeff_min": -8.0,
+  "coeff_max": 8.0,
+  "num_steps": 10,
+  "u_extent": 5.001659284494806,
+  "v_extent": 3.3107418785532405,
+  "has_parallax": true,
+  "parallax_min": -0.024197354912757874,
+  "parallax_max": 0.05070091411471367
+}

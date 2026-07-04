@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SLF Viewer</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="canvas"></canvas>
+
+    <a class="back-link" href="./index.html">← 처음으로</a>
+
+    <div id="overlay">
+      <div id="status">Loading…</div>
+    </div>
+
+    <div id="viewerNav" class="viewer-nav">
+      <button id="prevBtn" class="nav-btn" aria-label="이전 그림">‹</button>
+      <div id="paintingLabel" class="painting-label"></div>
+      <button id="nextBtn" class="nav-btn" aria-label="다음 그림">›</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/viewerMain.js"></script>
+</body>
+</html>

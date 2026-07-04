@@ -5,16 +5,7 @@
  */
 
 import * as THREE from 'three';
-
-// ── SH 상수 ─────────────────────────────────────────────────────────────────
-
-const _C0 = 0.28209479177387814;
-const _C1 = 0.4886025119029199;
-const _C2 = [ 1.0925484305920792, -1.0925484305920792,  0.31539156525252005,
-             -1.0925484305920792,  0.5462742152960396];
-const _C3 = [-0.5900435899266435,  2.890611442640554,  -0.4570457994644658,
-              0.3731763325901154, -0.4570457994644658,   1.445305721320277,
-             -0.5900435899266435];
+import { VERT, buildFragShader } from './slfShader.js';
 
 // ── 방 치수 ──────────────────────────────────────────────────────────────────
 
@@ -35,89 +26,6 @@ const WALLS = [
   { pos: new THREE.Vector3( ROOM.W / 2 - 0.015, PAINTING_Y, 0),                rot: new THREE.Euler(0, -Math.PI / 2, 0) },
   { pos: new THREE.Vector3(-ROOM.W / 2 + 0.015, PAINTING_Y, 0),                rot: new THREE.Euler(0,  Math.PI / 2, 0) },
 ];
-
-// ── GLSL 셰이더 ──────────────────────────────────────────────────────────────
-
-const VERT = `
-out vec2 v_uv;
-void main() {
-  v_uv = uv;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}
-`;
-
-function buildFragShader(K, dcOnly = false) {
-  const degree = Math.round(Math.sqrt(K)) - 1;
-
-  // dcOnly 모드에서는 u_k0만 선언 (나머지는 미로드 상태일 수 있음)
-  const samplerDecls = Array.from({ length: dcOnly ? 1 : K }, (_, k) =>
-    `uniform sampler2D u_k${k};`
-  ).join('\n');
-
-  const constLines = [
-    `const float C0  = ${_C0};`,
-    `const float C1  = ${_C1};`,
-  ];
-  if (degree >= 2) _C2.forEach((v, i) => constLines.push(`const float C2${i} = ${v};`));
-  if (degree >= 3) _C3.forEach((v, i) => constLines.push(`const float C3${i} = ${v};`));
-
-  const basisLines = ['float Y0 = C0;'];
-  if (K > 1) {
-    basisLines.push('float Y1 = -C1 * yr;');
-    basisLines.push('float Y2 =  C1 * zr;');
-    basisLines.push('float Y3 = -C1 * xr;');
-  }
-  if (K > 4) {
-    basisLines.push('float Y4 = C20 * xr * yr;');
-    basisLines.push('float Y5 = C21 * yr * zr;');
-    basisLines.push('float Y6 = C22 * (2.0*zr*zr - xr*xr - yr*yr);');
-    basisLines.push('float Y7 = C23 * xr * zr;');
-    basisLines.push('float Y8 = C24 * (xr*xr - yr*yr);');
-  }
-  if (K > 9) {
-    basisLines.push('float Y9  = C30 * yr * (3.0*xr*xr - yr*yr);');
-    basisLines.push('float Y10 = C31 * xr * yr * zr;');
-    basisLines.push('float Y11 = C32 * yr * (4.0*zr*zr - xr*xr - yr*yr);');
-    basisLines.push('float Y12 = C33 * zr * (2.0*zr*zr - 3.0*xr*xr - 3.0*yr*yr);');
-    basisLines.push('float Y13 = C34 * xr * (4.0*zr*zr - xr*xr - yr*yr);');
-    basisLines.push('float Y14 = C35 * zr * (xr*xr - yr*yr);');
-    basisLines.push('float Y15 = C36 * xr * (xr*xr - 3.0*yr*yr);');
-  }
-
-  const terms = Array.from({ length: dcOnly ? 1 : K }, (_, k) =>
-    `    ${k === 0 ? '' : '+ '}Y${k} * texture(u_k${k}, v_uv).rgb`
-  ).join('\n');
-
-  return `precision highp float;
-precision highp sampler2D;
-
-${constLines.join('\n')}
-
-${samplerDecls}
-uniform vec3  u_cam_local;
-uniform float u_aspect;
-
-in  vec2 v_uv;
-out vec4 fragColor;
-
-void main() {
-  vec3 pix_pos = vec3((v_uv - 0.5) * vec2(u_aspect, 1.0), 0.0);
-  vec3 d = normalize(u_cam_local - pix_pos);
-
-  float z0 = clamp(d.z, 0.0, 1.0);
-  float xr  = 2.0 * d.x * z0;
-  float yr  = 2.0 * d.y * z0;
-  float zr  = 2.0 * z0 * z0 - 1.0;
-
-  ${basisLines.join('\n  ')}
-
-  vec3 color =
-${terms};
-
-  fragColor = vec4(clamp(color + 0.5, 0.0, 1.0), 1.0);
-}
-`;
-}
 
 // ── SLFViewer ────────────────────────────────────────────────────────────────
 
@@ -158,6 +66,11 @@ export class SLFViewer {
     this._resize();
     window.addEventListener('resize', () => this._resize());
     this._animate();
+  }
+
+  /** KTX2(압축 텍스처) 지원 감지용으로 slfLoader에 넘겨줄 렌더러. */
+  get renderer() {
+    return this._renderer;
   }
 
   // ── 방 구성 ───────────────────────────────────────────────────────────────
@@ -247,15 +160,26 @@ export class SLFViewer {
 
       const geometry = new THREE.PlaneGeometry(aspect * PAINTING_H, PAINTING_H);
 
+      const hasParallax = !!meta.has_parallax;
+
       const uniforms = {};
       for (let k = 0; k < textures.length; k++) uniforms[`u_k${k}`] = { value: textures[k] };
-      uniforms.u_cam_local = { value: new THREE.Vector3() };
-      uniforms.u_aspect    = { value: aspect };
+      uniforms.u_cam_local   = { value: new THREE.Vector3() };
+      uniforms.u_aspect      = { value: aspect };
+      uniforms.u_coeff_min   = { value: meta.coeff_min ?? -8.0 };
+      uniforms.u_coeff_range = { value: (meta.coeff_max ?? 8.0) - (meta.coeff_min ?? -8.0) };
+      if (hasParallax) {
+        uniforms.u_uv_per_length = {
+          value: new THREE.Vector2(1 / meta.u_extent, 1 / meta.v_extent),
+        };
+        uniforms.u_parallax_min   = { value: meta.parallax_min ?? -1.0 };
+        uniforms.u_parallax_range = { value: (meta.parallax_max ?? 1.0) - (meta.parallax_min ?? -1.0) };
+      }
 
       const material = new THREE.ShaderMaterial({
         uniforms,
         vertexShader:   VERT,
-        fragmentShader: buildFragShader(K, true), // 초기엔 DC-only (플랫)
+        fragmentShader: buildFragShader(K, true, 0), // 초기엔 DC-only (플랫, parallax 없음)
         glslVersion:    THREE.GLSL3,
       });
 
@@ -264,7 +188,12 @@ export class SLFViewer {
       mesh.rotation.copy(wall.rot);
       this._scene.add(mesh);
 
-      this._paintings.push({ mesh, K, ready: false });
+      // numSteps: 전체 SLF(parallaxTex 포함)가 로드되기 전까지는 0(parallax 비활성) —
+      // upgradePainting에서 parallaxTex가 도착하면 meta.num_steps로 올라간다.
+      this._paintings.push({
+        mesh, K, ready: false,
+        numSteps: hasParallax ? (meta.num_steps ?? 4) : 0,
+      });
 
       // 3D HUD: 벽면 위에 캔버스 텍스처 평면을 부착
       const hudCanvas = document.createElement('canvas');
@@ -316,8 +245,9 @@ export class SLFViewer {
    * 백그라운드에서 전체 SLF 텍스처가 준비됐을 때 호출.
    * @param {number} index
    * @param {THREE.DataTexture[]} allTextures  k00 ~ k{K-1}
+   * @param {THREE.DataTexture | null} [parallaxTex]  u_parallax_map (has_parallax일 때만)
    */
-  upgradePainting(index, allTextures) {
+  upgradePainting(index, allTextures, parallaxTex = null) {
     const p = this._paintings[index];
     if (!p || p.ready) return;
 
@@ -326,10 +256,15 @@ export class SLFViewer {
     for (let k = 0; k < allTextures.length; k++) {
       p.mesh.material.uniforms[`u_k${k}`] = { value: allTextures[k] };
     }
+    if (parallaxTex) {
+      p.mesh.material.uniforms.u_parallax_map = { value: parallaxTex };
+    } else {
+      p.numSteps = 0; // relief 데이터가 없었음 — parallax 비활성 유지
+    }
     p.K     = allTextures.length;
     p.ready = true;
 
-    // 현재 바라보는 그림이면 즉시 SLF로 전환
+    // 현재 바라보는 그림이면 즉시 SLF(+parallax)로 전환
     if (index === this._primaryIdx) this._applyLOD();
   }
 
@@ -420,7 +355,7 @@ export class SLFViewer {
     for (let i = 0; i < this._paintings.length; i++) {
       const p       = this._paintings[i];
       const useFull = i === this._primaryIdx && p.ready;
-      p.mesh.material.fragmentShader = buildFragShader(p.K, !useFull);
+      p.mesh.material.fragmentShader = buildFragShader(p.K, !useFull, useFull ? p.numSteps : 0);
       p.mesh.material.needsUpdate    = true;
     }
   }
