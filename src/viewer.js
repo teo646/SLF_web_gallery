@@ -132,8 +132,13 @@ export class SLFViewer {
 
     canvas.addEventListener('pointerdown', e => {
       if (e.pointerType === 'mouse') {
-        // 클릭하면 포인터를 잠가 이후 마우스 이동만으로 시점을 돌릴 수 있게 한다.
-        if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
+        // 클릭할 때마다 잠금/해제를 토글: 잠그면 이후 마우스 이동만으로 시점을 돌리고,
+        // 다시 클릭하면 풀어서 커서를 되찾는다(Esc와 동일하게 동작).
+        if (document.pointerLockElement === canvas) {
+          document.exitPointerLock();
+        } else {
+          canvas.requestPointerLock();
+        }
       } else if (e.pointerType === 'touch' && !touchLook) {
         touchLook = { id: e.pointerId, x: e.clientX, y: e.clientY };
       }
