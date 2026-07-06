@@ -50,6 +50,7 @@ export class SLFViewer {
     this._targetPitch = 0;
     this._pos      = new THREE.Vector3(0, 1.6, ROOM.D / 2 - 0.5);
     this._keys     = new Set();
+    this._moveVec  = new THREE.Vector2(0, 0); // 모바일 가상 조이스틱 입력 (x: 좌우, y: 전후)
     this._lastTime = performance.now();
 
     // 매 프레임 재사용 벡터
@@ -124,14 +125,35 @@ export class SLFViewer {
   _setupFPS() {
     const canvas = this._canvas;
     const MOUSE_SENS  = 0.0025;
+    const TOUCH_SENS  = 0.006;
     const PITCH_LIMIT = Math.PI / 2.2;
 
-    // 클릭하면 포인터를 잠가 이후 마우스 이동만으로 시점을 돌릴 수 있게 한다.
-    canvas.addEventListener('click', () => {
-      if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
+    let touchLook = null; // { id, x, y } — 터치 드래그로 시점을 돌리는 중인 포인터
+
+    canvas.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse') {
+        // 클릭하면 포인터를 잠가 이후 마우스 이동만으로 시점을 돌릴 수 있게 한다.
+        if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
+      } else if (e.pointerType === 'touch' && !touchLook) {
+        touchLook = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      }
     });
 
-    document.addEventListener('mousemove', e => {
+    canvas.addEventListener('pointermove', e => {
+      if (touchLook && e.pointerId === touchLook.id) {
+        const dx = e.clientX - touchLook.x;
+        const dy = e.clientY - touchLook.y;
+        touchLook.x = e.clientX;
+        touchLook.y = e.clientY;
+
+        this._targetYaw  += dx * TOUCH_SENS;
+        this._targetPitch = Math.max(-PITCH_LIMIT,
+          Math.min(PITCH_LIMIT, this._targetPitch - dy * TOUCH_SENS));
+        this._yaw   = this._targetYaw;
+        this._pitch = this._targetPitch;
+        return;
+      }
+
       if (document.pointerLockElement !== canvas) return;
 
       this._targetYaw  += e.movementX * MOUSE_SENS;
@@ -143,12 +165,23 @@ export class SLFViewer {
       this._pitch = this._targetPitch;
     });
 
+    const releaseTouchLook = e => {
+      if (touchLook && e.pointerId === touchLook.id) touchLook = null;
+    };
+    canvas.addEventListener('pointerup', releaseTouchLook);
+    canvas.addEventListener('pointercancel', releaseTouchLook);
+
     document.addEventListener('keydown', e => {
       this._keys.add(e.code);
       if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))
         e.preventDefault();
     });
     document.addEventListener('keyup', e => this._keys.delete(e.code));
+  }
+
+  /** 모바일 가상 조이스틱에서 호출: x(좌 -1 ~ 우 +1), y(위 -1 ~ 아래 +1). */
+  setMoveVector(x, y) {
+    this._moveVec.set(x, y);
   }
 
   // ── 공개 API ─────────────────────────────────────────────────────────────
@@ -308,6 +341,12 @@ export class SLFViewer {
     if (keys.has('KeyS') || keys.has('ArrowDown'))  this._pos.addScaledVector(this._fwd, -speed);
     if (keys.has('KeyA') || keys.has('ArrowLeft'))  this._pos.addScaledVector(this._rgt, -speed);
     if (keys.has('KeyD') || keys.has('ArrowRight')) this._pos.addScaledVector(this._rgt,  speed);
+
+    // 모바일 가상 조이스틱 (위로 밀면 y<0 → 전진)
+    if (this._moveVec.lengthSq() > 0.0001) {
+      this._pos.addScaledVector(this._fwd, -this._moveVec.y * speed);
+      this._pos.addScaledVector(this._rgt,  this._moveVec.x * speed);
+    }
 
     const { W, D } = ROOM;
     const m = 0.35;

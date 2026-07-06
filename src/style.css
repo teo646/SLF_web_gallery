@@ -20,6 +20,7 @@ html, body {
   display: block;
   width: 100%;
   height: 100%;
+  touch-action: none; /* 브라우저 기본 스크롤/핀치줌 제스처를 막고 직접 처리 */
 }
 
 /* ── 오버레이 ───────────────────────────────────────────────── */
@@ -261,5 +262,38 @@ html, body {
   transition: width 0.2s;
 }
 
+/* ── 모바일 가상 조이스틱 (갤러리 이동) ───────────────────────── */
 
+.joystick-base {
+  display: none; /* 터치 기기에서만 표시 */
+  position: absolute;
+  left: 28px;
+  bottom: 28px;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  z-index: 20;
+  touch-action: none;
+}
+
+.joystick-nub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  margin: -26px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+}
+
+@media (pointer: coarse) {
+  .joystick-base {
+    display: block;
+  }
+}
 

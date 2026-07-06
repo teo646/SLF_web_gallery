@@ -52,6 +52,8 @@ export class SLFPaintingViewer {
 
     this._dragging   = false;
     this._lastPointer = { x: 0, y: 0 };
+    this._pinchStartDist = 0; // 핀치 줌 시작 시점의 두 손가락 간 거리
+    this._pinchStartZoom = 1;
 
     // 렌더링 진행률 HUD
     const { mesh: hudMesh, ctx: hudCtx, canvas: hudCanvas, tex: hudTex } = createHUDMesh(HUD_3D_W, HUD_3D_H);
@@ -190,14 +192,40 @@ export class SLFPaintingViewer {
   _setupControls() {
     const canvas = this._canvas;
 
+    // 터치는 손가락 개수로 모드가 갈린다: 1개 = 오빗 드래그, 2개 = 핀치 줌.
+    // (PC에서는 마우스 포인터 1개만 들어오므로 기존 드래그 동작과 동일하게 작동한다.)
+    this._touches = new Map(); // pointerId -> { x, y }
+
     canvas.addEventListener('pointerdown', e => {
-      this._dragging = true;
-      this._lastPointer = { x: e.clientX, y: e.clientY };
       canvas.setPointerCapture(e.pointerId);
+      this._touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (this._touches.size === 1) {
+        this._dragging = true;
+        this._lastPointer = { x: e.clientX, y: e.clientY };
+      } else if (this._touches.size === 2) {
+        this._dragging = false;
+        const [a, b] = [...this._touches.values()];
+        this._pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y);
+        this._pinchStartZoom = this._targetZoom;
+      }
     });
 
     canvas.addEventListener('pointermove', e => {
-      if (!this._dragging) return;
+      if (!this._touches.has(e.pointerId)) return;
+      this._touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (this._touches.size === 2) {
+        const [a, b] = [...this._touches.values()];
+        const dist = Math.hypot(a.x - b.x, a.y - b.y);
+        if (this._pinchStartDist > 0) {
+          this._targetZoom = clamp(
+            this._pinchStartZoom * (this._pinchStartDist / dist), ZOOM_MIN, ZOOM_MAX);
+        }
+        return;
+      }
+
+      if (!this._dragging || this._touches.size !== 1) return;
       const dx = e.clientX - this._lastPointer.x;
       const dy = e.clientY - this._lastPointer.y;
       this._lastPointer = { x: e.clientX, y: e.clientY };
@@ -206,10 +234,20 @@ export class SLFPaintingViewer {
       this._targetPitch = clamp(this._targetPitch + dy * 0.005, -PITCH_LIMIT, PITCH_LIMIT);
     });
 
-    const stopDrag = () => { this._dragging = false; };
-    canvas.addEventListener('pointerup', stopDrag);
-    canvas.addEventListener('pointercancel', stopDrag);
-    canvas.addEventListener('pointerleave', stopDrag);
+    const releasePointer = e => {
+      this._touches.delete(e.pointerId);
+      if (this._touches.size === 1) {
+        // 손가락 하나가 남으면 그 지점을 새 기준점 삼아 오빗 드래그를 이어간다(점프 방지).
+        const [remaining] = [...this._touches.values()];
+        this._dragging   = true;
+        this._lastPointer = { x: remaining.x, y: remaining.y };
+      } else {
+        this._dragging = false;
+      }
+    };
+    canvas.addEventListener('pointerup', releasePointer);
+    canvas.addEventListener('pointercancel', releasePointer);
+    canvas.addEventListener('pointerleave', releasePointer);
 
     canvas.addEventListener('wheel', e => {
       e.preventDefault();

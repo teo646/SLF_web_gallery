@@ -1,12 +1,17 @@
 import './style.css';
 import { SLFViewer } from './viewer.js';
 import { loadSLFPaintingDC, loadSLFPainting } from './slfLoader.js';
+import { createJoystick } from './joystick.js';
+import { IS_TOUCH } from './device.js';
 
-const canvas    = /** @type {HTMLCanvasElement} */ (document.getElementById('canvas'));
-const overlayEl = document.getElementById('overlay');
-const statusEl  = document.getElementById('status');
+const canvas       = /** @type {HTMLCanvasElement} */ (document.getElementById('canvas'));
+const overlayEl    = document.getElementById('overlay');
+const statusEl     = document.getElementById('status');
+const joystickBase = document.getElementById('joystickBase');
+const joystickNub  = document.getElementById('joystickNub');
 
 const viewer = new SLFViewer(canvas);
+createJoystick(joystickBase, joystickNub, (x, y) => viewer.setMoveVector(x, y));
 
 async function init() {
   let index;
@@ -23,7 +28,13 @@ async function init() {
     return;
   }
 
-  statusEl.innerHTML = `
+  statusEl.innerHTML = IS_TOUCH ? `
+    <div class="loading-text">Loading gallery…</div>
+    <div class="controls-grid">
+      <span class="ctrl-key">Drag</span><span class="ctrl-desc">Look around</span>
+      <span class="ctrl-key">Joystick</span><span class="ctrl-desc">Move</span>
+    </div>
+  ` : `
     <div class="loading-text">Loading gallery…</div>
     <div class="controls-grid">
       <span class="ctrl-key">Click</span><span class="ctrl-desc">Enable mouse look</span>

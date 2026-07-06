@@ -1,6 +1,7 @@
 import './style.css';
 import { SLFPaintingViewer } from './paintingViewer.js';
 import { loadSLFPaintingDC, loadSLFPainting } from './slfLoader.js';
+import { IS_TOUCH } from './device.js';
 
 const canvas        = /** @type {HTMLCanvasElement} */ (document.getElementById('canvas'));
 const overlayEl      = document.getElementById('overlay');
@@ -31,13 +32,19 @@ async function init() {
     return;
   }
 
-  statusEl.innerHTML = `
+  statusEl.innerHTML = IS_TOUCH ? `
+    <div class="loading-text">Loading painting…</div>
+    <div class="controls-grid">
+      <span class="ctrl-key">Drag</span><span class="ctrl-desc">Rotate view</span>
+      <span class="ctrl-key">Pinch</span><span class="ctrl-desc">Zoom in / out</span>
+    </div>
+  ` : `
     <div class="loading-text">Loading painting…</div>
     <div class="controls-grid">
       <span class="ctrl-key">Drag</span><span class="ctrl-desc">Rotate view</span>
       <span class="ctrl-key">Wheel</span><span class="ctrl-desc">Zoom in / out</span>
       <span class="ctrl-key">WASD</span><span class="ctrl-desc">Pan</span>
-      </div>
+    </div>
   `;
 
   viewerNavEl.style.display = 'flex';
