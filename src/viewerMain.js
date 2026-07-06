@@ -21,32 +21,28 @@ async function init() {
   try {
     index = await fetch(`${import.meta.env.BASE_URL}gallery/index.json`).then(r => r.json());
   } catch {
-    showStatus('gallery/index.json를 찾을 수 없습니다.\nscripts/convert_to_web.py를 먼저 실행하세요.');
+    showStatus('Could not find gallery/index.json.\nRun scripts/convert_to_web.py first.');
     return;
   }
 
   paintings = index.paintings ?? [];
   if (paintings.length === 0) {
-    showStatus('등록된 페인팅이 없습니다.\nscripts/convert_to_web.py를 실행하세요.');
+    showStatus('No paintings registered.\nRun scripts/convert_to_web.py.');
     return;
   }
 
   statusEl.innerHTML = `
-    <div class="loading-text">그림 로딩 중…</div>
+    <div class="loading-text">Loading painting…</div>
     <div class="controls-grid">
-      <span class="ctrl-key">Drag</span><span class="ctrl-desc">시점 회전</span>
-      <span class="ctrl-key">Wheel</span><span class="ctrl-desc">확대 · 축소</span>
-      <span class="ctrl-key">‹ ›</span><span class="ctrl-desc">이전 · 다음 그림</span>
-    </div>
+      <span class="ctrl-key">Drag</span><span class="ctrl-desc">Rotate view</span>
+      <span class="ctrl-key">Wheel</span><span class="ctrl-desc">Zoom in / out</span>
+      <span class="ctrl-key">WASD</span><span class="ctrl-desc">Pan</span>
+      </div>
   `;
 
   viewerNavEl.style.display = 'flex';
   prevBtn.addEventListener('click', () => goTo(currentIdx - 1));
   nextBtn.addEventListener('click', () => goTo(currentIdx + 1));
-  document.addEventListener('keydown', e => {
-    if (e.key === 'ArrowLeft')  goTo(currentIdx - 1);
-    if (e.key === 'ArrowRight') goTo(currentIdx + 1);
-  });
 
   await loadCurrent();
 
@@ -56,7 +52,7 @@ async function init() {
 
   const closeBtn = document.createElement('button');
   closeBtn.className = 'close-btn';
-  closeBtn.textContent = '✕ 닫기';
+  closeBtn.textContent = '✕ Close';
   closeBtn.addEventListener('click', () => overlayEl.style.display = 'none');
   statusEl.appendChild(closeBtn);
 
@@ -81,8 +77,12 @@ async function loadCurrent() {
   if (token !== loadToken) return; // 그 사이 다른 그림으로 넘어감
   viewer.setPainting(dc);
 
-  // Phase 2: 백그라운드에서 전체 SLF 로드 → 완료되면 업그레이드
-  const full = await loadSLFPainting(basePath, undefined, viewer.renderer);
+  // Phase 2: 백그라운드에서 전체 SLF 로드 → 진행 표시 후 업그레이드
+  const full = await loadSLFPainting(
+    basePath,
+    (loaded, total) => { if (token === loadToken) viewer.setProgress(loaded, total); },
+    viewer.renderer,
+  );
   if (token !== loadToken) return;
   viewer.upgradePainting(full.textures, full.parallaxTex);
 }

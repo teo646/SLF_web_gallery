@@ -7,12 +7,19 @@
 
 import * as THREE from 'three';
 import { VERT, buildFragShader } from './slfShader.js';
+import { HUD_CW, HUD_CH, createHUDMesh, drawHUD } from './hud.js';
 
 // 학습된 SLF는 정면 근처 시야에서만 신뢰할 수 있으므로 오빗 각도를 제한한다.
 const YAW_LIMIT   = Math.PI / 3;   // ±60°
 const PITCH_LIMIT = Math.PI / 3.5; // ±~51°
-const ZOOM_MIN    = 0.6;
+const ZOOM_MIN    = 0.1;
 const ZOOM_MAX    = 3.0;
+const PAN_SLACK   = 0.5; // 그림 절반 크기 대비 추가로 허용할 여유 패닝 비율
+
+// HUD 3D 크기 (그림 높이 1 기준)
+const HUD_3D_W = 0.425;
+const HUD_3D_H = HUD_3D_W * HUD_CH / HUD_CW;
+const HUD_Y_OFFSET = -0.28; // 그림 하단부에 오버레이
 
 export class SLFPaintingViewer {
   /** @param {HTMLCanvasElement} canvas */
@@ -38,12 +45,27 @@ export class SLFPaintingViewer {
     this._zoom        = 1;
     this._targetZoom  = 1;
 
+    // 패닝 상태 (WASD / 방향키로 확대된 화면 안에서 시야를 이동)
+    this._pan       = new THREE.Vector2(0, 0);
+    this._targetPan = new THREE.Vector2(0, 0);
+    this._keys      = new Set();
+
     this._dragging   = false;
     this._lastPointer = { x: 0, y: 0 };
 
+    // 렌더링 진행률 HUD
+    const { mesh: hudMesh, ctx: hudCtx, canvas: hudCanvas, tex: hudTex } = createHUDMesh(HUD_3D_W, HUD_3D_H);
+    hudMesh.position.set(0, HUD_Y_OFFSET, 0.01);
+    hudMesh.visible = false;
+    this._scene.add(hudMesh);
+    this._hud = { mesh: hudMesh, ctx: hudCtx, canvas: hudCanvas, tex: hudTex, done: true, fadeStartTime: 0 };
+
     this._setupControls();
     this._resize();
-    window.addEventListener('resize', () => this._resize());
+    // window resize만 감지하면 창 크기는 그대로인데 캔버스 표시 영역만 바뀌는
+    // 경우(포워딩된 브라우저 패널, 숨겨진 탭 복귀 등)를 놓쳐 카메라 종횡비가
+    // 어긋난 채로 고정되므로, 실제 렌더 영역 크기 변화를 직접 관찰한다.
+    new ResizeObserver(() => this._resize()).observe(this._canvas.parentElement);
     this._animate();
   }
 
@@ -97,6 +119,25 @@ export class SLFPaintingViewer {
 
     this._resetView();
     this._resize(); // aspect가 바뀌었으니 기준 거리 재계산
+
+    // HUD 리셋: DC-only 미리보기면 0%부터, 이미 전체 SLF가 도착해 있으면 즉시 숨김
+    const hud = this._hud;
+    hud.done = this._ready;
+    hud.mesh.material.opacity = this._ready ? 0 : 1;
+    hud.mesh.visible          = !this._ready;
+    if (!this._ready) drawHUD(hud.ctx, hud.canvas, hud.tex, 0);
+  }
+
+  /** 백그라운드에서 전체 SLF 로드 중일 때 반복 호출해 진행률 HUD를 갱신 */
+  setProgress(loaded, total) {
+    const hud = this._hud;
+    if (hud.done) return;
+    const pct = total > 0 ? Math.min(1, loaded / total) : 0;
+    drawHUD(hud.ctx, hud.canvas, hud.tex, pct);
+    if (pct >= 1) {
+      hud.done          = true;
+      hud.fadeStartTime = performance.now();
+    }
   }
 
   /** setPainting으로 DC 미리보기를 띄운 뒤, 전체 SLF 텍스처가 도착하면 호출 */
@@ -119,6 +160,9 @@ export class SLFPaintingViewer {
 
   dispose() {
     this._disposePainting();
+    this._hud.mesh.geometry.dispose();
+    this._hud.mesh.material.dispose();
+    this._hud.tex.dispose();
     this._renderer.dispose();
   }
 
@@ -139,6 +183,8 @@ export class SLFPaintingViewer {
     this._yaw = this._targetYaw = 0;
     this._pitch = this._targetPitch = 0;
     this._zoom  = this._targetZoom  = 1;
+    this._pan.set(0, 0);
+    this._targetPan.set(0, 0);
   }
 
   _setupControls() {
@@ -157,7 +203,7 @@ export class SLFPaintingViewer {
       this._lastPointer = { x: e.clientX, y: e.clientY };
 
       this._targetYaw   = clamp(this._targetYaw   - dx * 0.005, -YAW_LIMIT, YAW_LIMIT);
-      this._targetPitch = clamp(this._targetPitch - dy * 0.005, -PITCH_LIMIT, PITCH_LIMIT);
+      this._targetPitch = clamp(this._targetPitch + dy * 0.005, -PITCH_LIMIT, PITCH_LIMIT);
     });
 
     const stopDrag = () => { this._dragging = false; };
@@ -170,6 +216,12 @@ export class SLFPaintingViewer {
       const factor = Math.exp(e.deltaY * 0.001);
       this._targetZoom = clamp(this._targetZoom * factor, ZOOM_MIN, ZOOM_MAX);
     }, { passive: false });
+
+    document.addEventListener('keydown', e => {
+      this._keys.add(e.code);
+      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+    });
+    document.addEventListener('keyup', e => this._keys.delete(e.code));
   }
 
   _updateCamera(dt) {
@@ -179,11 +231,35 @@ export class SLFPaintingViewer {
     this._zoom  += (this._targetZoom  - this._zoom)  * t;
 
     const dist = this._baseDist * this._zoom;
+
+    // WASD/방향키 패닝: 확대해서 화면에 보이는 영역이 그림보다 작아진 만큼만 이동을 허용한다
+    // (기본 배율에서는 그림 전체가 이미 보이므로 이동 범위가 0으로 clamp됨).
+    const visHalfH = dist * Math.tan(THREE.MathUtils.degToRad(this._camera.fov) / 2);
+    const visHalfW = visHalfH * this._camera.aspect;
+    const maxPanX  = Math.max(0, this._aspect / 2 - visHalfW) + (this._aspect / 2) * PAN_SLACK;
+    const maxPanY  = Math.max(0, 0.5 - visHalfH) + 0.5 * PAN_SLACK;
+
+    const panSpeed = 0.6 * dt;
+    const keys = this._keys;
+    if (keys.has('KeyW') || keys.has('ArrowUp'))    this._targetPan.y += panSpeed;
+    if (keys.has('KeyS') || keys.has('ArrowDown'))  this._targetPan.y -= panSpeed;
+    if (keys.has('KeyA') || keys.has('ArrowLeft'))  this._targetPan.x -= panSpeed;
+    if (keys.has('KeyD') || keys.has('ArrowRight')) this._targetPan.x += panSpeed;
+    this._targetPan.x = clamp(this._targetPan.x, -maxPanX, maxPanX);
+    this._targetPan.y = clamp(this._targetPan.y, -maxPanY, maxPanY);
+
+    this._pan.x += (this._targetPan.x - this._pan.x) * t;
+    this._pan.y += (this._targetPan.y - this._pan.y) * t;
+
     const cy = Math.cos(this._yaw),   sy = Math.sin(this._yaw);
     const cp = Math.cos(this._pitch), sp = Math.sin(this._pitch);
 
-    this._camera.position.set(dist * sy * cp, dist * sp, dist * cy * cp);
-    this._camera.lookAt(0, 0, 0);
+    this._camera.position.set(
+      this._pan.x + dist * sy * cp,
+      this._pan.y + dist * sp,
+      dist * cy * cp,
+    );
+    this._camera.lookAt(this._pan.x, this._pan.y, 0);
   }
 
   _updatePaintingUniform() {
@@ -202,6 +278,14 @@ export class SLFPaintingViewer {
     this._updateCamera(dt);
     this._updatePaintingUniform();
 
+    // 완료된 HUD 페이드 아웃
+    const hud = this._hud;
+    if (hud.done && hud.mesh.visible) {
+      const t = (now - hud.fadeStartTime) / 800;
+      hud.mesh.material.opacity = Math.max(0, 1 - t);
+      if (hud.mesh.material.opacity <= 0) hud.mesh.visible = false;
+    }
+
     this._renderer.render(this._scene, this._camera);
   }
 
@@ -209,6 +293,8 @@ export class SLFPaintingViewer {
     const el = this._canvas.parentElement;
     const w  = el.clientWidth;
     const h  = el.clientHeight;
+    if (w === 0 || h === 0) return; // 탭이 숨겨진 상태 등, 아직 레이아웃되지 않음
+    this._renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this._renderer.setSize(w, h, false);
     this._camera.aspect = w / h;
 

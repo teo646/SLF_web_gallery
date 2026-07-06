@@ -13,21 +13,22 @@ async function init() {
   try {
     index = await fetch(`${import.meta.env.BASE_URL}gallery/index.json`).then(r => r.json());
   } catch {
-    showStatus('gallery/index.json를 찾을 수 없습니다.\nscripts/convert_to_web.py를 먼저 실행하세요.');
+    showStatus('Could not find gallery/index.json.\nRun scripts/convert_to_web.py first.');
     return;
   }
 
   const paintings = index.paintings ?? [];
   if (paintings.length === 0) {
-    showStatus('등록된 페인팅이 없습니다.\nscripts/convert_to_web.py를 실행하세요.');
+    showStatus('No paintings registered.\nRun scripts/convert_to_web.py.');
     return;
   }
 
   statusEl.innerHTML = `
-    <div class="loading-text">갤러리 로딩 중…</div>
+    <div class="loading-text">Loading gallery…</div>
     <div class="controls-grid">
-      <span class="ctrl-key">Click</span><span class="ctrl-desc">시점 변경</span>
-      <span class="ctrl-key">W A S D</span><span class="ctrl-desc">앞 · 좌 · 뒤 · 우 이동</span>
+      <span class="ctrl-key">Click</span><span class="ctrl-desc">Enable mouse look</span>
+      <span class="ctrl-key">Mouse</span><span class="ctrl-desc">Look around</span>
+      <span class="ctrl-key">W A S D</span><span class="ctrl-desc">Move forward / left / back / right</span>
     </div>
   `;
 
@@ -47,7 +48,7 @@ async function init() {
 
   const closeBtn = document.createElement('button');
   closeBtn.className = 'close-btn';
-  closeBtn.textContent = '✕ 닫기';
+  closeBtn.textContent = '✕ Close';
   closeBtn.addEventListener('click', () => overlayEl.style.display = 'none');
   statusEl.appendChild(closeBtn);
 
