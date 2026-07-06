@@ -129,6 +129,7 @@ export class SLFViewer {
     const PITCH_LIMIT = Math.PI / 2.2;
 
     let touchLook = null; // { id, x, y } — 터치 드래그로 시점을 돌리는 중인 포인터
+    let lockRetryTimer = null;
 
     canvas.addEventListener('pointerdown', e => {
       if (e.pointerType === 'mouse') {
@@ -142,6 +143,18 @@ export class SLFViewer {
       } else if (e.pointerType === 'touch' && !touchLook) {
         touchLook = { id: e.pointerId, x: e.clientX, y: e.clientY };
       }
+    });
+
+    // 브라우저는 포인터 락을 해제한 직후 곧바로 재요청하면 클릭재킹 방지용
+    // 쿨다운으로 이를 거부한다(pointerlockerror 발생). 배포 환경에서는 Esc나
+    // 창 포커스 이탈로 락이 풀린 직후 다시 클릭하는 경우가 흔해 이 쿨다운에
+    // 걸리기 쉬우므로, 토글이 먹통으로 보이지 않도록 잠시 후 한 번 재시도한다.
+    document.addEventListener('pointerlockerror', () => {
+      if (document.pointerLockElement === canvas) return;
+      clearTimeout(lockRetryTimer);
+      lockRetryTimer = setTimeout(() => {
+        if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
+      }, 400);
     });
 
     canvas.addEventListener('pointermove', e => {

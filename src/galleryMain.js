@@ -37,7 +37,7 @@ async function init() {
   ` : `
     <div class="loading-text">Loading gallery…</div>
     <div class="controls-grid">
-      <span class="ctrl-key">Click</span><span class="ctrl-desc">Enable mouse look</span>
+      <span class="ctrl-key">Click</span><span class="ctrl-desc">Toggle mouse look</span>
       <span class="ctrl-key">Mouse</span><span class="ctrl-desc">Look around</span>
       <span class="ctrl-key">W A S D</span><span class="ctrl-desc">Move forward / left / back / right</span>
     </div>
