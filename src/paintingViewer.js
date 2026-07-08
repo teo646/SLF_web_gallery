@@ -83,7 +83,10 @@ export class SLFPaintingViewer {
     this._disposePainting();
 
     this._aspect = meta.W / meta.H;
-    const hasParallax = !!parallaxTex && !!meta.has_parallax;
+    // meta.has_parallax만으로 판단한다(viewer.js와 동일) — parallaxTex는 항상 DC 미리보기
+    // 다음 upgradePainting에서야 도착하므로, 여기서 parallaxTex 존재를 요구하면 numSteps가
+    // 0으로 고정돼 이후 전체 SLF가 와도 parallax가 영영 켜지지 않는다.
+    const hasParallax = !!meta.has_parallax;
 
     const geometry = new THREE.PlaneGeometry(this._aspect, 1);
 
@@ -97,9 +100,10 @@ export class SLFPaintingViewer {
       uniforms.u_uv_per_length = {
         value: new THREE.Vector2(1 / meta.u_extent, 1 / meta.v_extent),
       };
-      uniforms.u_parallax_map   = { value: parallaxTex };
       uniforms.u_parallax_min   = { value: meta.parallax_min ?? -1.0 };
       uniforms.u_parallax_range = { value: (meta.parallax_max ?? 1.0) - (meta.parallax_min ?? -1.0) };
+      uniforms.u_height_range   = { value: meta.height_range ?? 0.0 };
+      if (parallaxTex) uniforms.u_parallax_map = { value: parallaxTex };
     }
 
     const dcOnly    = textures.length === 1;

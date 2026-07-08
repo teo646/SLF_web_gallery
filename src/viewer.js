@@ -231,6 +231,7 @@ export class SLFViewer {
         };
         uniforms.u_parallax_min   = { value: meta.parallax_min ?? -1.0 };
         uniforms.u_parallax_range = { value: (meta.parallax_max ?? 1.0) - (meta.parallax_min ?? -1.0) };
+        uniforms.u_height_range   = { value: meta.height_range ?? 0.0 };
       }
 
       const material = new THREE.ShaderMaterial({

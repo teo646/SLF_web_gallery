@@ -3,9 +3,9 @@
  *
  * gallery/<name>/meta.json  - H, W, degree, coeff_min, coeff_max,
  *                              num_steps, u_extent, v_extent, has_parallax,
- *                              parallax_min, parallax_max
+ *                              parallax_min, parallax_max, height_range
  * gallery/<name>/k00.png … k{K-1}.png  - 16-bit RGB PNG (float32 계수 인코딩)
- * gallery/<name>/parallax.png          - 16-bit 단일채널 PNG (n_z·h 인코딩, has_parallax일 때만)
+ * gallery/<name>/parallax.png          - 16-bit 단일채널 PNG (height, world 단위 인코딩, has_parallax일 때만)
  * gallery/<name>/k00.ktx2 … / parallax.ktx2 - 위 PNG들을 8bit로 재양자화해 KTX2(UASTC)로
  *                              압축한 버전(scripts/build-ktx2.mjs). 있으면 우선 사용하고,
  *                              트랜스코딩 미지원 브라우저거나 파일이 없으면 PNG로 폴백한다.

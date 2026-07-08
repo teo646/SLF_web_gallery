@@ -10,12 +10,21 @@ const viewerNavEl    = document.getElementById('viewerNav');
 const prevBtn        = document.getElementById('prevBtn');
 const nextBtn        = document.getElementById('nextBtn');
 const paintingLabelEl = document.getElementById('paintingLabel');
+const paintingCaptionEl = document.getElementById('paintingCaption');
 
 const viewer = new SLFPaintingViewer(canvas);
 
 let paintings  = [];
 let currentIdx = 0;
 let loadToken  = 0; // 그림 전환 중 지난 로딩 결과가 덮어쓰지 않도록 막는 토큰
+
+// TODO: 실제 저작권/작품 설명 문구로 교체 필요 (임시 placeholder)
+const CAPTIONS = {
+  custom_impasto_test: 'Oil on canvas, custom impasto study drawing.',
+  The_Holy_Family_with_Saint_John_the_Baptist: 'Photographed with permission from Cultureni for portfolio and promotional use.',
+  '나무의_서': '캔버스에 유채, 2024. 무단 복제 및 상업적 이용을 금합니다. © 하울 작가.',
+};
+const DEFAULT_CAPTION = 'Digital reproduction for viewing purposes only. All rights reserved by the artist.';
 
 async function init() {
   let index;
@@ -48,6 +57,7 @@ async function init() {
   `;
 
   viewerNavEl.style.display = 'flex';
+  paintingCaptionEl.style.display = 'block';
   prevBtn.addEventListener('click', () => goTo(currentIdx - 1));
   nextBtn.addEventListener('click', () => goTo(currentIdx + 1));
 
@@ -97,6 +107,7 @@ async function loadCurrent() {
 function updateLabel(name) {
   const displayName = name.replace(/_/g, ' ');
   paintingLabelEl.textContent = `${currentIdx + 1} / ${paintings.length} · ${displayName}`;
+  paintingCaptionEl.textContent = CAPTIONS[name] ?? DEFAULT_CAPTION;
 }
 
 function showStatus(msg) {

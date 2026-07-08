@@ -181,6 +181,23 @@ html, body {
   letter-spacing: 0.02em;
 }
 
+.painting-caption {
+  display: none; /* JS가 로딩 완료 후 표시 */
+  position: absolute;
+  left: 50%;
+  bottom: 88px;
+  transform: translateX(-50%);
+  z-index: 20;
+  max-width: min(480px, 80vw);
+  text-align: center;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
 /* ── 랜딩 페이지 ────────────────────────────────────────────── */
 
 #landing {

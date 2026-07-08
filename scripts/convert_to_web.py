@@ -16,12 +16,13 @@ Usage:
 
     <name_dir>/models/sh_pngs/meta.npz, k00.png, ...   (필수)
     <name_dir>/dataset/plane.npz                        (필수 — u_extent/v_extent)
-    <name_dir>/dataset/relief/height.npy, normal.npy    (선택 — 있으면 parallax mapping 활성화)
+    <name_dir>/dataset/relief/height.npy                (선택 — 있으면 parallax mapping 활성화)
 
 동작:
     1. meta.npz + plane.npz (+ relief) →  public/gallery/<name>/meta.json
     2. k00.png … k{K-1}.png            →  public/gallery/<name>/
-    3. relief가 있으면 parallax map(n_z·h)을 16bit PNG로 인코딩 → parallax.png
+    3. relief가 있으면 height map을 16bit PNG로 인코딩 → parallax.png
+       (+ POM 레이마칭용 height_range도 함께 계산해 meta.json에 저장)
     4. public/gallery/index.json  에 name 추가 (중복 제외)
 """
 
@@ -48,19 +49,33 @@ def _find_sh_pngs_dir(name_dir: Path) -> Path:
     )
 
 
-def _encode_parallax_png(height: np.ndarray, normal: np.ndarray) -> tuple[np.ndarray, float, float]:
-    """parallax map(n_z·h, world 단위)을 16bit 단일 채널 PNG용 배열로 정규화한다.
+def _encode_parallax_png(height: np.ndarray) -> tuple[np.ndarray, float, float]:
+    """height map(world 단위, 평면 위 = 0)을 16bit 단일 채널 PNG용 배열로 정규화한다.
 
-    render.py의 build_parallax_map_texture와 동일한 값(Pxy = n_z·h)을 [p_min, p_max] 선형
-    구간으로 uint16에 매핑한다 — SH 계수 PNG 인코딩(model._coeff_to_u16)과 같은 방식이다.
+    render.py의 build_parallax_map_texture와 동일하게 raw height를 그대로 인코딩한다 —
+    시선 방향에 따른 보정(POM 레이마칭, VZ_MIN 클램프)은 셰이더의 resolve_uv가 매 프레임
+    수행하므로, 여기서 normal.z를 미리 곱해두지 않는다. [p_min, p_max] 선형 구간으로
+    uint16에 매핑하는 방식은 SH 계수 PNG 인코딩(model._coeff_to_u16)과 동일하다.
     """
-    parallax = (normal[..., 2] * height).astype(np.float32)
-    p_min, p_max = float(parallax.min()), float(parallax.max())
+    height = height.astype(np.float32)
+    p_min, p_max = float(height.min()), float(height.max())
     if p_max - p_min < 1e-12:
         p_max = p_min + 1e-6  # 평평한 그림(모든 값이 0) — 구간이 0이 되는 것을 방지
     scale = 65535.0 / (p_max - p_min)
-    u16 = np.clip((parallax - p_min) * scale, 0, 65535).astype(np.uint16)
+    u16 = np.clip((height - p_min) * scale, 0, 65535).astype(np.uint16)
     return u16, p_min, p_max
+
+
+def _compute_height_range(height: np.ndarray, margin: float = 1.15) -> float:
+    """POM 레이마칭이 훑을 후보 높이 범위(world 단위, u_height_range)를 height map에서 계산한다.
+
+    render.py의 compute_height_range와 동일 — 실제 표면 높이가 [-range, +range]를 벗어나지
+    않도록 margin(기본 15%) 여유를 둔다. 학습(ID pass)과 렌더링(shading pass)이 같은
+    height_map에서 이 값을 계산해 써야 두 pass의 UV 해석이 일치하므로, render.py 쪽과
+    정확히 같은 공식을 써야 한다.
+    """
+    peak = float(np.abs(height).max()) if height.size else 0.0
+    return max(peak * margin, 1e-6)
 
 
 def main() -> None:
@@ -113,16 +128,17 @@ def main() -> None:
     # ── relief → parallax.png (parallax mapping) ────────────────────────────
     relief_dir   = name_dir / "dataset" / "relief"
     height_path  = relief_dir / "height.npy"
-    normal_path  = relief_dir / "normal.npy"
-    if height_path.exists() and normal_path.exists():
+    if height_path.exists():
         height = np.load(height_path)
-        normal = np.load(normal_path)
-        u16, p_min, p_max = _encode_parallax_png(height, normal)
+        u16, p_min, p_max = _encode_parallax_png(height)
+        height_range = _compute_height_range(height)
         cv2.imwrite(str(dst / "parallax.png"), u16)
         meta["has_parallax"]  = True
         meta["parallax_min"]  = p_min
         meta["parallax_max"]  = p_max
-        print(f"[parallax] {dst / 'parallax.png'}  (range [{p_min:.5f}, {p_max:.5f}])")
+        meta["height_range"]  = height_range
+        print(f"[parallax] {dst / 'parallax.png'}  (range [{p_min:.5f}, {p_max:.5f}], "
+              f"height_range={height_range:.5f})")
     else:
         # 기존에 parallax.png가 남아있으면(재변환 시) 지운다 — has_parallax=False와 어긋나지 않도록.
         (dst / "parallax.png").unlink(missing_ok=True)

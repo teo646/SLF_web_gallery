@@ -22,9 +22,10 @@ void main() {
 `;
 
 // surface-light-fields-for-planar-paintings/src/render.py의 RESOLVE(resolve_uv)와 동일한
-// parallax mapping. v_frag_pos(=pix_pos)는 고정한 채, 텍스처를 샘플링하는 uv만 반복 보정한다
-// — 두 구현이 같은 grid에 대해 학습됐으므로 공식이 정확히 일치해야 한다. numSteps=0이면
-// 이 블록 전체가 생성되지 않아 v_uv를 그대로 쓰는 예전 동작(평면 렌더링)과 같다.
+// POM(Parallax Occlusion Mapping). v_frag_pos(=pix_pos)는 고정한 채, 카메라 광선이 height
+// map 표면과 만나는 uv를 레이마칭으로 찾는다 — 두 구현이 같은 grid에 대해 학습됐으므로
+// 공식이 정확히 일치해야 한다. numSteps=0이면 이 블록 전체가 생성되지 않아 v_uv를 그대로
+// 쓰는 예전 동작(평면 렌더링)과 같다.
 export function buildFragShader(K, dcOnly = false, numSteps = 0) {
   const degree = Math.round(Math.sqrt(K)) - 1;
   const useParallax = !dcOnly && numSteps > 0;
@@ -70,23 +71,51 @@ export function buildFragShader(K, dcOnly = false, numSteps = 0) {
     `    ${k === 0 ? '' : '+ '}Y${k} * (texture(u_k${k}, uv).rgb * u_coeff_range + u_coeff_min)`
   ).join('\n');
 
-  // p_xy(=n_z·h, world 단위)를 u_uv_per_length(=1/u_extent, 1/v_extent)로 uv 변위로 환산.
+  // render.py의 resolve_uv와 동일한 POM(Parallax Occlusion Mapping): 카메라 광선이 height
+  // map(world 단위, 평면 위=0)으로 정의된 실제 표면과 처음 교차하는 uv를 레이마칭으로 찾는다.
+  // u_height_range(탐색할 후보 높이의 절댓값 상한, world 단위)를 +range~-range 사이로
+  // numSteps번 등분해 훑다가 표면 높이가 후보 깊이를 앞지르는 지점(surf_h >= probe_h)에서
+  // 멈추고, 마지막 두 샘플 사이를 secant(선형) 보간해 교차점을 추정한다. vz(그레이징
+  // 각도에서 0에 근접)로 나누는 항이 발산하지 않도록 VZ_MIN으로 클램프한다 — render.py의
+  // VZ_MIN/u_height_range와 반드시 같은 값을 써야 학습 때와 같은 UV 보정이 나온다.
   // 부호는 render.py의 resolve_uv와 동일하게 +1로 고정(실제 사진과 오버레이해 확정된 값).
   const parallaxDecl = useParallax ? `
+const float VZ_MIN = 0.15;
 uniform sampler2D u_parallax_map;
 uniform vec2      u_uv_per_length;
 uniform float     u_parallax_min;
 uniform float     u_parallax_range;
+uniform float     u_height_range;
 
-vec2 resolve_uv(vec2 uv0, vec2 uv_est, vec2 view_xy) {
-  float p_xy = texture(u_parallax_map, uv_est).r * u_parallax_range + u_parallax_min;
-  return uv0 + p_xy * view_xy * u_uv_per_length;
+vec2 resolve_uv(vec2 uv0, vec3 view_local) {
+  float vz     = max(view_local.z, VZ_MIN);
+  vec2  dir_uv = (view_local.xy / vz) * u_uv_per_length;
+
+  float layer_step = (2.0 * u_height_range) / float(${numSteps});
+  float probe_h  = u_height_range;
+  vec2  probe_uv = uv0 + probe_h * dir_uv;
+  float surf_h   = texture(u_parallax_map, probe_uv).r * u_parallax_range + u_parallax_min;
+
+  float prev_h = probe_h, prev_surf_h = surf_h;
+  vec2  prev_uv = probe_uv;
+
+  for (int i = 0; i < ${numSteps}; ++i) {
+    if (surf_h >= probe_h) break;
+    prev_h = probe_h; prev_surf_h = surf_h; prev_uv = probe_uv;
+    probe_h  -= layer_step;
+    probe_uv  = uv0 + probe_h * dir_uv;
+    surf_h    = texture(u_parallax_map, probe_uv).r * u_parallax_range + u_parallax_min;
+  }
+
+  float prev_diff = prev_surf_h - prev_h;
+  float cur_diff  = surf_h - probe_h;
+  float denom     = prev_diff - cur_diff;
+  float weight    = (abs(denom) > 1e-8) ? clamp(prev_diff / denom, 0.0, 1.0) : 0.0;
+  return mix(prev_uv, probe_uv, weight);
 }
 ` : '';
 
-  const parallaxLoop = useParallax
-    ? `for (int s = 0; s < ${numSteps}; s++) { uv = resolve_uv(v_uv, uv, d.xy); }`
-    : '';
+  const parallaxUV = useParallax ? 'resolve_uv(v_uv, d)' : 'v_uv';
 
   return `precision highp float;
 precision highp sampler2D;
@@ -106,8 +135,7 @@ void main() {
   vec3 pix_pos = vec3((v_uv - 0.5) * vec2(u_aspect, 1.0), 0.0);
   vec3 d = normalize(u_cam_local - pix_pos);
 
-  vec2 uv = v_uv;
-  ${parallaxLoop}
+  vec2 uv = ${parallaxUV};
   uv = clamp(uv, 0.0, 1.0);
 
   float z0 = clamp(d.z, 0.0, 1.0);
