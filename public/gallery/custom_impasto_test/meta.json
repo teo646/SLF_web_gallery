@@ -1,14 +1,14 @@
 {
-  "H": 1390,
-  "W": 2159,
+  "H": 1406,
+  "W": 2134,
   "degree": 2,
   "coeff_min": -8.0,
   "coeff_max": 8.0,
   "num_steps": 32,
-  "u_extent": 6.034295643778101,
-  "v_extent": 3.8837827089200916,
+  "u_extent": 5.942706605805064,
+  "v_extent": 3.9160494248507236,
   "has_parallax": true,
-  "parallax_min": -0.018587348982691765,
-  "parallax_max": 0.0443025678396225,
-  "height_range": 0.050947953015565865
+  "parallax_min": -0.01842024177312851,
+  "parallax_max": 0.04372650384902954,
+  "height_range": 0.05028547942638397
 }
