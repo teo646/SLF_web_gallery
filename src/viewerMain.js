@@ -101,7 +101,7 @@ async function loadCurrent() {
     viewer.renderer,
   );
   if (token !== loadToken) return;
-  viewer.upgradePainting(full.textures, full.parallaxTex);
+  viewer.upgradePainting(full.coeffs);
 }
 
 function updateLabel(name) {

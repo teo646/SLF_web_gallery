@@ -1,19 +1,24 @@
 #!/usr/bin/env node
 /**
- * public/gallery/<name>/{k00..k(K-1)}.png, parallax.png (16-bit) 을
- * 모바일에서 GPU가 직접 압축 해제할 수 있는 KTX2(UASTC) 텍스처로 추가 변환한다.
+ * public/gallery/<name>/{k00..k(K-1)}.png (16-bit) 을 모바일에서 GPU가 직접 압축 해제할 수
+ * 있는 KTX2(UASTC) 텍스처로 변환한다:
  *
- * 원본 16-bit PNG는 그대로 남겨두고(구형 브라우저/트랜스코딩 미지원 시 폴백),
- * 같은 폴더에 k00.ktx2 … / parallax.ktx2 를 나란히 생성한다.
+ *   k00.ktx2      - k00 단독, 단일 레이어 (DC 미리보기용, u_k0)
+ *   coeffs.ktx2   - k00 ~ k{K-1} 전체를 K개 레이어로 묶은 텍스처 배열 (전체 SLF 렌더링용,
+ *                   slfShader.js의 sampler2DArray u_coeffs가 그대로 대응)
  *
- * 계수 데이터는 색이 아니라 SH 계수를 8bit로 재양자화한 값이므로 basisu에
- * -linear 를 지정해 sRGB 감마 보정이 끼어들지 않게 한다.
+ * PNG 폴백은 지원하지 않으므로(구형 브라우저 미대응, slfLoader.js도 KTX2만 읽는다) 변환에
+ * 성공하면 원본 k*.png는 지운다 — public/gallery/에는 최종적으로 KTX2만 남는다.
+ *
+ * 계수 데이터는 색이 아니라 SH 계수를 8bit로 재양자화한 값이므로 basisu에 -linear 를
+ * 지정해 sRGB 감마 보정이 끼어들지 않게 한다.
  *
  * Usage:
- *   node scripts/build-ktx2.mjs [name ...]   # 생략 시 gallery 전체
+ *   python scripts/convert_to_web.py <outputs 폴더>   # k00.png ... 를 먼저 받아온다
+ *   node scripts/build-ktx2.mjs [name ...]            # 생략 시 gallery 전체
  */
 
-import { readFileSync, writeFileSync, readdirSync, statSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, mkdtempSync, rmSync, chmodSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -32,11 +37,15 @@ function resolveBasisuBinary() {
   }
   const arch = os.arch();
   const sse = cpuFeatures().flags.sse4_1 === true;
-  return join(
+  const binPath = join(
     dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', 'basisu', 'bin',
     platform, sse ? `${arch}_sse` : arch,
     platform === 'win' ? 'basisu.exe' : 'basisu',
   );
+  // npm install 후 실행 권한이 풀려있는 경우가 있다(basisu 패키지 자체의 bin/basisu.js도
+  // 실행 전 동일하게 방어적으로 chmod한다).
+  if (platform !== 'win') chmodSync(binPath, 0o755);
+  return binPath;
 }
 
 const BASISU = resolveBasisuBinary();
@@ -77,19 +86,8 @@ function requantizeTo8bit(srcPath) {
   return encode({ width: padded.width, height: padded.height, data: padded.data, depth: 8, channels });
 }
 
-function convertOne(srcPng, dstKtx2) {
-  const tmpDir = mkdtempSync(join(tmpdir(), 'ktx2-'));
-  const tmpPng = join(tmpDir, 'in.png');
-  try {
-    writeFileSync(tmpPng, requantizeTo8bit(srcPng));
-    execFileSync(BASISU, [
-      '-ktx2', '-uastc', '-uastc_level', '2', '-linear', '-no_alpha',
-      '-file', tmpPng,
-      '-output_file', dstKtx2,
-    ], { stdio: 'pipe' });
-  } finally {
-    rmSync(tmpDir, { recursive: true, force: true });
-  }
+function runBasisu(args) {
+  execFileSync(BASISU, args, { stdio: 'pipe' });
 }
 
 function fileSize(path) {
@@ -108,27 +106,40 @@ function convertPainting(name) {
   }
 
   const K = (meta.degree + 1) ** 2;
-  let beforeTotal = 0, afterTotal = 0;
-
-  for (let k = 0; k < K; k++) {
-    const base = `k${String(k).padStart(2, '0')}`;
-    const srcPng = join(dir, `${base}.png`);
-    const dstKtx2 = join(dir, `${base}.ktx2`);
-    convertOne(srcPng, dstKtx2);
-    beforeTotal += fileSize(srcPng);
-    afterTotal += fileSize(dstKtx2);
-    console.log(`[${name}] ${base}.png (${(fileSize(srcPng)/1e6).toFixed(1)}MB) → ${base}.ktx2 (${(fileSize(dstKtx2)/1e6).toFixed(1)}MB)`);
+  const srcPngs = Array.from({ length: K }, (_, k) => join(dir, `k${String(k).padStart(2, '0')}.png`));
+  const missing = srcPngs.filter(p => fileSize(p) === 0);
+  if (missing.length > 0) {
+    console.warn(`[skip] ${name}: PNG 없음 — ${missing.join(', ')}`);
+    return;
   }
 
-  if (meta.has_parallax) {
-    const srcPng = join(dir, 'parallax.png');
-    const dstKtx2 = join(dir, 'parallax.ktx2');
-    convertOne(srcPng, dstKtx2);
-    beforeTotal += fileSize(srcPng);
-    afterTotal += fileSize(dstKtx2);
-    console.log(`[${name}] parallax.png (${(fileSize(srcPng)/1e6).toFixed(1)}MB) → parallax.ktx2 (${(fileSize(dstKtx2)/1e6).toFixed(1)}MB)`);
+  const commonArgs = ['-ktx2', '-uastc', '-uastc_level', '2', '-linear', '-no_alpha'];
+  const beforeTotal = srcPngs.reduce((sum, p) => sum + fileSize(p), 0);
+
+  const tmpDir = mkdtempSync(join(tmpdir(), 'ktx2-'));
+  try {
+    const tmpPngs = srcPngs.map((srcPng, k) => {
+      const tmpPng = join(tmpDir, `k${String(k).padStart(2, '0')}.png`);
+      writeFileSync(tmpPng, requantizeTo8bit(srcPng));
+      return tmpPng;
+    });
+
+    const k00Ktx2 = join(dir, 'k00.ktx2');
+    runBasisu([...commonArgs, '-file', tmpPngs[0], '-output_file', k00Ktx2]);
+    console.log(`[${name}] k00.png (${(fileSize(srcPngs[0])/1e6).toFixed(1)}MB) → k00.ktx2 (${(fileSize(k00Ktx2)/1e6).toFixed(1)}MB)`);
+
+    const coeffsKtx2 = join(dir, 'coeffs.ktx2');
+    const fileArgs = tmpPngs.flatMap(p => ['-file', p]);
+    runBasisu([...commonArgs, '-tex_type', '2darray', ...fileArgs, '-output_file', coeffsKtx2]);
+    console.log(`[${name}] ${K}개 레이어 (${(beforeTotal/1e6).toFixed(1)}MB) → coeffs.ktx2 (${(fileSize(coeffsKtx2)/1e6).toFixed(1)}MB)`);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
   }
 
+  // PNG 폴백은 지원하지 않는다(slfLoader.js는 KTX2만 읽는다) — 변환에 성공했으니 원본은 지운다.
+  for (const p of srcPngs) unlinkSync(p);
+
+  const afterTotal = fileSize(join(dir, 'k00.ktx2')) + fileSize(join(dir, 'coeffs.ktx2'));
   console.log(`[${name}] 합계: ${(beforeTotal/1e6).toFixed(1)}MB → ${(afterTotal/1e6).toFixed(1)}MB (${(100 * afterTotal / beforeTotal).toFixed(0)}%)`);
 }
 

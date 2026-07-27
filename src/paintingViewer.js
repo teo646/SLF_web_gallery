@@ -79,14 +79,10 @@ export class SLFPaintingViewer {
   // ── 공개 API ─────────────────────────────────────────────────────────────
 
   /** 새 그림으로 교체 (DC만 있는 미리보기 or 전체 SLF 둘 다 사용 가능) */
-  setPainting({ textures, meta, K, parallaxTex = null }) {
+  setPainting({ textures, meta, K }) {
     this._disposePainting();
 
     this._aspect = meta.W / meta.H;
-    // meta.has_parallax만으로 판단한다(viewer.js와 동일) — parallaxTex는 항상 DC 미리보기
-    // 다음 upgradePainting에서야 도착하므로, 여기서 parallaxTex 존재를 요구하면 numSteps가
-    // 0으로 고정돼 이후 전체 SLF가 와도 parallax가 영영 켜지지 않는다.
-    const hasParallax = !!meta.has_parallax;
 
     const geometry = new THREE.PlaneGeometry(this._aspect, 1);
 
@@ -96,32 +92,21 @@ export class SLFPaintingViewer {
     uniforms.u_aspect      = { value: this._aspect };
     uniforms.u_coeff_min   = { value: meta.coeff_min ?? -8.0 };
     uniforms.u_coeff_range = { value: (meta.coeff_max ?? 8.0) - (meta.coeff_min ?? -8.0) };
-    if (hasParallax) {
-      uniforms.u_uv_per_length = {
-        value: new THREE.Vector2(1 / meta.u_extent, 1 / meta.v_extent),
-      };
-      uniforms.u_parallax_min   = { value: meta.parallax_min ?? -1.0 };
-      uniforms.u_parallax_range = { value: (meta.parallax_max ?? 1.0) - (meta.parallax_min ?? -1.0) };
-      uniforms.u_height_range   = { value: meta.height_range ?? 0.0 };
-      if (parallaxTex) uniforms.u_parallax_map = { value: parallaxTex };
-    }
 
-    const dcOnly    = textures.length === 1;
-    const numSteps  = hasParallax ? (meta.num_steps ?? 4) : 0;
+    const dcOnly = textures.length === 1;
 
     const material = new THREE.ShaderMaterial({
       uniforms,
       vertexShader:   VERT,
-      fragmentShader: buildFragShader(K, dcOnly, dcOnly ? 0 : numSteps),
+      fragmentShader: buildFragShader(K, dcOnly),
       glslVersion:    THREE.GLSL3,
     });
 
     this._mesh = new THREE.Mesh(geometry, material);
     this._scene.add(this._mesh);
 
-    this._K        = K;
-    this._numSteps = numSteps;
-    this._ready    = !dcOnly;
+    this._K     = K;
+    this._ready = !dcOnly;
 
     this._resetView();
     this._resize(); // aspect가 바뀌었으니 기준 거리 재계산
@@ -146,21 +131,16 @@ export class SLFPaintingViewer {
     }
   }
 
-  /** setPainting으로 DC 미리보기를 띄운 뒤, 전체 SLF 텍스처가 도착하면 호출 */
-  upgradePainting(allTextures, parallaxTex = null) {
+  /** setPainting으로 DC 미리보기를 띄운 뒤, 전체 SLF(coeffs.ktx2) 텍스처가 도착하면 호출 */
+  upgradePainting(coeffsTex) {
     if (!this._mesh || this._ready) return;
 
     this._mesh.material.uniforms.u_k0.value.dispose();
-    for (let k = 0; k < allTextures.length; k++) {
-      this._mesh.material.uniforms[`u_k${k}`] = { value: allTextures[k] };
-    }
-    if (parallaxTex) {
-      this._mesh.material.uniforms.u_parallax_map = { value: parallaxTex };
-    }
+    delete this._mesh.material.uniforms.u_k0;
+    this._mesh.material.uniforms.u_coeffs = { value: coeffsTex };
 
-    this._K     = allTextures.length;
     this._ready = true;
-    this._mesh.material.fragmentShader = buildFragShader(this._K, false, this._numSteps);
+    this._mesh.material.fragmentShader = buildFragShader(this._K, false);
     this._mesh.material.needsUpdate    = true;
   }
 

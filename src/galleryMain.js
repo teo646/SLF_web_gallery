@@ -73,7 +73,7 @@ async function init() {
       `${import.meta.env.BASE_URL}gallery/${name}`,
       (loaded, total) => viewer.setProgress(i, loaded, total),
       viewer.renderer,
-    ).then(({ textures, parallaxTex }) => viewer.upgradePainting(i, textures, parallaxTex));
+    ).then(({ coeffs }) => viewer.upgradePainting(i, coeffs));
   });
 }
 
