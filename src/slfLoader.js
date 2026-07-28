@@ -1,7 +1,8 @@
 /**
  * SLF 데이터 로더.
  *
- * gallery/<name>/meta.json     - H, W, degree, coeff_min, coeff_max, u_extent, v_extent
+ * gallery/<name>/meta.json     - H, W, degree, coeff_min, coeff_max, ac_coeff_min, ac_coeff_max,
+ *                                 u_extent, v_extent
  * gallery/<name>/k00.ktx2      - KTX2/UASTC, 단일 레이어 (DC 미리보기, u_k0)
  * gallery/<name>/coeffs.ktx2   - KTX2/UASTC, K개 레이어 텍스처 배열 (k00~k{K-1} 전체, u_coeffs)
  *
@@ -11,7 +12,7 @@
  * 미대응) KTX2 트랜스코딩을 지원하지 않는 환경에서는 로드가 실패한다.
  *
  * 텍스처에는 [0,1] 정규화 값만 담고, 실제 계수 범위로의 환산은 slfShader.js의
- * u_coeff_min/u_coeff_range가 수행한다.
+ * u_coeff_min/u_coeff_range(k00)와 u_coeff_min_ac/u_coeff_range_ac(k01+)가 수행한다.
  */
 
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';

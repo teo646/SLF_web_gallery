@@ -87,14 +87,21 @@ def main() -> None:
     u_extent = float(plane["u_coords"][-1] - plane["u_coords"][0])
     v_extent = float(plane["v_coords"][-1] - plane["v_coords"][0])
 
+    coeff_min = float(sh_meta.get("coeff_min", np.float32(-8.0)))
+    coeff_max = float(sh_meta.get("coeff_max", np.float32( 8.0)))
     meta = {
-        "H":         int(sh_meta["H"]),
-        "W":         int(sh_meta["W"]),
-        "degree":    int(sh_meta["degree"]),
-        "coeff_min": float(sh_meta.get("coeff_min", np.float32(-8.0))),
-        "coeff_max": float(sh_meta.get("coeff_max", np.float32( 8.0))),
-        "u_extent":  u_extent,
-        "v_extent":  v_extent,
+        "H":            int(sh_meta["H"]),
+        "W":            int(sh_meta["W"]),
+        "degree":       int(sh_meta["degree"]),
+        "coeff_min":    coeff_min,
+        "coeff_max":    coeff_max,
+        # k01+(고차항/AC) 전용 범위 — k00보다 훨씬 좁게 잡아 8bit 인코딩 정밀도를 높인다
+        # (model.py의 save_sh_pngs 참고). 구버전 sh_pngs/meta.npz에는 없을 수 있으니
+        # 그런 경우엔 k00과 같은 범위로 폴백한다.
+        "ac_coeff_min": float(sh_meta.get("ac_coeff_min", np.float32(coeff_min))),
+        "ac_coeff_max": float(sh_meta.get("ac_coeff_max", np.float32(coeff_max))),
+        "u_extent":     u_extent,
+        "v_extent":     v_extent,
     }
     K = (meta["degree"] + 1) ** 2
 

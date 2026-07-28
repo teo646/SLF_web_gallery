@@ -4,6 +4,8 @@
   "degree": 1,
   "coeff_min": -8.0,
   "coeff_max": 8.0,
+  "ac_coeff_min": -1.439447283744812,
+  "ac_coeff_max": 1.439447283744812,
   "u_extent": 4.599901869081651,
   "v_extent": 6.24475024500077
 }

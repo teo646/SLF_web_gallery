@@ -296,8 +296,10 @@ export class SLFViewer {
       for (let k = 0; k < textures.length; k++) uniforms[`u_k${k}`] = { value: textures[k] };
       uniforms.u_cam_local   = { value: new THREE.Vector3() };
       uniforms.u_aspect      = { value: aspect };
-      uniforms.u_coeff_min   = { value: meta.coeff_min ?? -8.0 };
-      uniforms.u_coeff_range = { value: (meta.coeff_max ?? 8.0) - (meta.coeff_min ?? -8.0) };
+      uniforms.u_coeff_min      = { value: meta.coeff_min ?? -8.0 };
+      uniforms.u_coeff_range    = { value: (meta.coeff_max ?? 8.0) - (meta.coeff_min ?? -8.0) };
+      uniforms.u_coeff_min_ac   = { value: meta.ac_coeff_min ?? meta.coeff_min ?? -8.0 };
+      uniforms.u_coeff_range_ac = { value: (meta.ac_coeff_max ?? meta.coeff_max ?? 8.0) - (meta.ac_coeff_min ?? meta.coeff_min ?? -8.0) };
 
       const material = new THREE.ShaderMaterial({
         uniforms,

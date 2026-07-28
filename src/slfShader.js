@@ -50,11 +50,13 @@ export function buildFragShader(K, dcOnly = false) {
   }
 
   // 텍스처는 [0,1] 정규화 값(KTX2/UASTC 트랜스코딩 결과)만 담고 있으므로, 실제 SH 계수
-  // 범위로의 환산(coeff_min ~ coeff_max)은 항상 셰이더에서 수행한다.
+  // 범위로의 환산은 항상 셰이더에서 수행한다. k00(DC)과 k01+(AC/고차항)은 값의 크기가
+  // 한 자릿수 이상 차이 나서(model.py의 save_sh_pngs 참고) 인코딩 범위를 따로 쓴다 —
+  // 하나의 범위를 공유하면 작은 AC 값이 8bit 변환에서 뭉개진다.
   const terms = dcOnly
     ? '    Y0 * (texture(u_k0, v_uv).rgb * u_coeff_range + u_coeff_min)'
     : Array.from({ length: K }, (_, k) =>
-        `    ${k === 0 ? '' : '+ '}Y${k} * (texture(u_coeffs, vec3(v_uv, ${k}.0)).rgb * u_coeff_range + u_coeff_min)`
+        `    ${k === 0 ? '' : '+ '}Y${k} * (texture(u_coeffs, vec3(v_uv, ${k}.0)).rgb * ${k === 0 ? 'u_coeff_range + u_coeff_min' : 'u_coeff_range_ac + u_coeff_min_ac'})`
       ).join('\n');
 
   return `precision highp float;
@@ -66,6 +68,8 @@ uniform vec3  u_cam_local;
 uniform float u_aspect;
 uniform float u_coeff_min;
 uniform float u_coeff_range;
+uniform float u_coeff_min_ac;
+uniform float u_coeff_range_ac;
 
 in  vec2 v_uv;
 out vec4 fragColor;
